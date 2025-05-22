@@ -161,11 +161,81 @@
 
 ## 5. 运行实验
 
-通过 `src/main.py` 脚本和配置文件启动实验：
+### 5.1 训练和评估模型
+
+以下是训练和评估不同路由机制模型的命令：
+
+#### RD-ESI 模型训练
 ```bash
-python src/main.py --config_file configs/rd_esi_custom_model_config.yaml --mode train_eval
+python src/main.py --config_file configs/rd_esi_custom_model_config.yaml --mode train --output_dir results/rd_esi
 ```
-确保配置文件指向正确的 **C4 tiny dataset** 路径和实验参数。
+
+#### Top-K 基线模型训练
+```bash
+python src/main.py --config_file configs/top_k_custom_model_config.yaml --mode train --output_dir results/top_k
+```
+
+#### Expert Choice 基线模型训练
+```bash
+python src/main.py --config_file configs/expert_choice_custom_model_config.yaml --mode train --output_dir results/expert_choice
+```
+
+### 5.2 仅评估模型
+
+如果您已经训练好模型并想单独评估它们，可以使用以下命令：
+
+#### 评估 RD-ESI 模型
+```bash
+python src/main.py --config_file configs/rd_esi_custom_model_config.yaml --mode eval --output_dir results/rd_esi_eval
+```
+
+#### 评估 Top-K 模型
+```bash
+python src/main.py --config_file configs/top_k_custom_model_config.yaml --mode eval --output_dir results/top_k_eval
+```
+
+#### 评估 Expert Choice 模型
+```bash
+python src/main.py --config_file configs/expert_choice_custom_model_config.yaml --mode eval --output_dir results/expert_choice_eval
+```
+
+### 5.3 运行比较实验
+
+为了比较不同路由机制的性能，可以使用比较脚本自动训练和评估所有模型：
+
+#### 比较所有路由机制
+```bash
+python src/experiments/run_comparison.py --mechanisms rd_esi top_k expert_choice --output_dir results/comparison
+```
+
+#### 比较特定路由机制（例如只比较 RD-ESI 和 Top-K）
+```bash
+python src/experiments/run_comparison.py --mechanisms rd_esi top_k --output_dir results/comparison_rd_esi_top_k
+```
+
+#### 使用 GPU 加速训练（如果可用）
+```bash
+python src/experiments/run_comparison.py --mechanisms rd_esi top_k expert_choice --device cuda --output_dir results/comparison_gpu
+```
+
+#### 自定义训练步数和评估间隔
+```bash
+python src/experiments/run_comparison.py --mechanisms rd_esi top_k expert_choice --steps 10000 --eval_interval 1000 --output_dir results/comparison_long
+```
+
+### 5.4 其他有用命令
+
+#### 设置随机种子以确保结果可复现
+```bash
+python src/main.py --config_file configs/rd_esi_custom_model_config.yaml --mode train_eval --seed 42
+```
+
+#### 在 CPU 上运行（无 GPU 环境）
+```bash
+python src/main.py --config_file configs/rd_esi_custom_model_config.yaml --mode train_eval --device cpu
+```
+
+确保配置文件中指向正确的 **C4 tiny dataset** 路径和实验参数。
 
 ## 6. RD-ESI 特定参数调优
 
