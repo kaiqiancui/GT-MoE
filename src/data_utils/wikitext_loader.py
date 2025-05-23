@@ -6,9 +6,9 @@ from typing import Dict, List, Tuple, Any, Optional, Union, Callable
 import numpy as np
 
 
-class C4TinyDataset(Dataset):
+class WikiTextDataset(Dataset):
     """
-    Dataset for the C4 tiny dataset.
+    Dataset for the Salesforce WikiText-103 dataset.
     
     Attributes:
         data (datasets.Dataset): The loaded dataset
@@ -29,7 +29,7 @@ class C4TinyDataset(Dataset):
         seed: int = 42,
     ):
         """
-        Initialize C4TinyDataset.
+        Initialize WikiTextDataset.
         
         Args:
             split: Dataset split ('train', 'validation', or 'test')
@@ -45,20 +45,21 @@ class C4TinyDataset(Dataset):
         self.max_length = max_length
         self.return_tensors = return_tensors
         
+        # Map the split names to the ones used in the WikiText dataset
+        if split == "validation":
+            dataset_split = "validation"
+        elif split == "test":
+            dataset_split = "test"
+        else:
+            dataset_split = "train"
+        
         # Load the dataset
         self.data = load_dataset(
-            "allenai/c4", 
-            "en", 
-            split=split, 
+            "Salesforce/wikitext", 
+            "wikitext-103-raw-v1", 
+            split=dataset_split, 
             streaming=streaming
         )
-        
-        # Take a small subset for "tiny" version if not streaming
-        if not streaming:
-            if split == "train":
-                self.data = self.data.select(range(100000))  # 100k examples for training
-            else:
-                self.data = self.data.select(range(10000))   # 10k examples for validation/test
         
         # Shuffle if requested
         if shuffle and not streaming:
@@ -70,7 +71,7 @@ class C4TinyDataset(Dataset):
                 self._tokenize_function,
                 batched=True,
                 num_proc=num_proc,
-                remove_columns=["text", "timestamp", "url"],
+                remove_columns=["text"],
             )
         
     def _tokenize_function(self, examples: Dict[str, List]) -> Dict[str, List]:
@@ -135,7 +136,7 @@ class C4TinyDataset(Dataset):
         return example
 
 
-def create_c4_tiny_dataloaders(
+def create_wikitext_dataloaders(
     tokenizer: PreTrainedTokenizerBase,
     batch_size: int = 16,
     max_length: int = 512,
@@ -143,7 +144,7 @@ def create_c4_tiny_dataloaders(
     streaming: bool = False,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
-    Create DataLoaders for the C4 tiny dataset.
+    Create DataLoaders for the WikiText-103 dataset.
     
     Args:
         tokenizer: Tokenizer for encoding text
@@ -156,21 +157,21 @@ def create_c4_tiny_dataloaders(
         Tuple of (train_dataloader, val_dataloader, test_dataloader)
     """
     # Create datasets
-    train_dataset = C4TinyDataset(
+    train_dataset = WikiTextDataset(
         split="train",
         tokenizer=tokenizer,
         max_length=max_length,
         streaming=streaming,
     )
     
-    val_dataset = C4TinyDataset(
+    val_dataset = WikiTextDataset(
         split="validation",
         tokenizer=tokenizer,
         max_length=max_length,
         streaming=streaming,
     )
     
-    test_dataset = C4TinyDataset(
+    test_dataset = WikiTextDataset(
         split="test",
         tokenizer=tokenizer,
         max_length=max_length,

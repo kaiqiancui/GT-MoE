@@ -6,7 +6,7 @@
 
 与当前主流MoE路由机制（如Top-K门控）相比，RD-ESI引入了动态声誉评分 $R_i(t)$、负载感知 $L_i(t)$ 以及探索奖励和声誉衰减等自适应激励策略，以期优化专家选择过程，改善负载均衡，促进专家特化，并缓解马太效应。
 
-核心目标：通过在 **OpenWebText dataset** 上进行实验，主要验证RD-ESI博弈论算法的性能和核心机制，而非构建一个领先水平的大型模型。
+核心目标：通过在 **WikiText dataset** 上进行实验，主要验证RD-ESI博弈论算法的性能和核心机制，而非构建一个领先水平的大型模型。
 
 详细的算法设计、公式、实现方案、训练策略和评估指标请参考项目研究方案文档。
 
@@ -39,7 +39,7 @@
 │   │   └── custom_transformer_moe.py # 自定义小型MoE Transformer模型架构
 │   ├── data_utils/             # 数据加载与预处理工具
 │   │   ├── __init__.py
-│   │   ├── openwebtext_loader.py # 加载和处理 OpenWebText dataset
+│   │   ├── wikitext_loader.py # 加载和处理 WikiText dataset
 │   │   └── tokenizer_utils.py  # 分词器相关工具
 │   ├── training/               # 训练相关的脚本和工具
 │   │   ├── __init__.py
@@ -73,7 +73,7 @@
 * `custom_transformer_moe.py`: 定义一个小型 MoE Transformer 模型架构，堆叠标准 Transformer 组件和自定义的 **`CustomMoELayer`**。
 
 ### `src/data_utils/`
-* `openwebtext_loader.py`: 负责加载和预处理 **OpenWebText dataset**，进行数据清洗、分词和批处理。
+* `wikitext_loader.py`: 负责加载和预处理 **WikiText dataset**，进行数据清洗、分词和批处理。
 * `tokenizer_utils.py`: 管理分词器的加载和使用。
 
 ### `src/training/`
@@ -93,19 +93,19 @@
 
 ## 4. 数据集
 
-本项目使用 **OpenWebText dataset** 作为训练和评估数据集。OpenWebText 是一个大规模的网络文本语料库，类似于GPT-2训练中使用的WebText数据集。
+本项目使用 **WikiText dataset** 作为训练和评估数据集。WikiText 是一个大规模的高质量语言建模数据集，由Salesforce研究团队创建。
 
-### OpenWebText 数据集特点
-* **来源**: 从Reddit上获得高赞的链接中提取的文本内容
-* **规模**: 约38GB的文本数据，包含超过800万个文档
-* **语言**: 主要是英语文本
-* **格式**: 纯文本格式，经过了去重和基本清洗
-* **适用性**: 适合语言模型预训练，包含多样化的主题和风格
+### WikiText 数据集特点
+* **来源**: 从维基百科上精选的高质量文章
+* **规模**: WikiText-103包含约103M个单词，WikiText-2包含约2M个单词
+* **语言**: 英语文本
+* **格式**: 已经过清洗和预处理，保留了文章结构和标点符号
+* **适用性**: 特别适合语言模型训练，比传统的Penn Treebank数据集更大更多样化
 
 ### 数据处理
-`src/data_utils/openwebtext_loader.py` 实现了 OpenWebText 数据集的加载和处理逻辑:
+`src/data_utils/wikitext_loader.py` 实现了 WikiText 数据集的加载和处理逻辑:
 1.  使用 HuggingFace Datasets 库加载数据
-2.  将数据集分割为训练集、验证集和测试集（98%/1%/1%的比例）
+2.  使用数据集自带的训练集、验证集和测试集划分
 3.  对文本进行分词处理
 4.  创建适用于语言模型训练的批次数据
 
@@ -186,5 +186,5 @@ python src/experiments/plot_results.py --results_dir results/comparison
 
 
 * 感谢所有为本项目做出贡献的研究者和开发者
-* 特别感谢 OpenWebText 数据集的创建者和维护者
+* 特别感谢 WikiText 数据集的创建者和维护者
 ```

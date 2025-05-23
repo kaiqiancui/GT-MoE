@@ -43,7 +43,7 @@ data:
 # Trainer configuration
 trainer:
   output_dir: "results/rd_esi_run"
-  device: "cuda"  # or "cpu" if no GPU available
+  device: "cuda:3"  # or "cpu" if no GPU available
   optimizer: "adamw"
   learning_rate: 5e-5
   weight_decay: 0.01
@@ -62,4 +62,4 @@ trainer:
 # Evaluator configuration
 evaluator:
   output_dir: "results/rd_esi_evaluation"
-  device: "cuda"  # or "cpu" if no GPU available
+  device: "cuda:3"  # or "cpu" if no GPU available

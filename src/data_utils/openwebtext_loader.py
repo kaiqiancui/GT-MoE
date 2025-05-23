@@ -52,11 +52,23 @@ class OpenWebTextDataset(Dataset):
         else:
             dataset_split = "train"  # We'll split this later for validation
             
-        self.data = load_dataset(
-            "openwebtext",
-            split=dataset_split,
-            streaming=streaming
-        )
+        # Use a more reliable approach to load the dataset
+        try:
+            self.data = load_dataset(
+                "openwebtext",
+                trust_remote_code=True,
+                split=dataset_split,
+                streaming=streaming
+            )
+        except Exception as e:
+            print(f"Error loading OpenWebText dataset: {e}")
+            # Fallback to using the Pile dataset which contains similar web text
+            self.data = load_dataset(
+                "EleutherAI/pile", 
+                name="all",
+                split=dataset_split,
+                streaming=streaming
+            )
         
         # If not streaming, create train/validation/test splits
         if not streaming:

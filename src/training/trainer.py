@@ -69,16 +69,16 @@ class Trainer:
         self.optimizer = get_optimizer(
             model=self.model,
             optimizer_name=self.config.get("optimizer", "adamw"),
-            learning_rate=self.config.get("learning_rate", 5e-5),
-            weight_decay=self.config.get("weight_decay", 0.01),
+            learning_rate=float(self.config.get("learning_rate", 5e-5)),
+            weight_decay=float(self.config.get("weight_decay", 0.01)),
         )
         
         # Set up learning rate scheduler
         self.lr_scheduler = get_lr_scheduler(
             optimizer=self.optimizer,
             scheduler_name=self.config.get("lr_scheduler", "cosine"),
-            num_warmup_steps=self.config.get("warmup_steps", 100),
-            num_training_steps=self.config.get("max_steps", 1000),
+            num_warmup_steps=int(self.config.get("warmup_steps", 100)),
+            num_training_steps=int(self.config.get("max_steps", 1000)),
         )
         
         # Set up logger

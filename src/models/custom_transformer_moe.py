@@ -219,7 +219,9 @@ class MultiHeadAttention(nn.Module):
         
         # Apply attention mask if provided
         if attention_mask is not None:
-            attn_scores = attn_scores + attention_mask
+            # The attention mask is already in the correct format: [batch_size, 1, seq_len, seq_len]
+            # Just ensure it has the right dtype
+            attn_scores = attn_scores + attention_mask.to(dtype=attn_scores.dtype)
         
         # Apply softmax and dropout
         attn_weights = F.softmax(attn_scores, dim=-1)
@@ -474,78 +476,19 @@ class CustomMoETransformer(nn.Module):
         Returns:
             Transformer layer module
         """
-        # Create attention layer
-        attention = nn.MultiheadAttention(
-            embed_dim=self.hidden_size,
+        # Check if this layer should use MoE
+        use_moe = layer_idx in self.moe_layers
+        
+        # Create a TransformerBlock with or without MoE
+        return TransformerBlock(
+            hidden_size=self.hidden_size,
+            intermediate_size=self.intermediate_size,
             num_heads=self.num_heads,
             dropout=self.dropout,
-            batch_first=True,
+            layer_id=layer_idx,
+            use_moe=use_moe,
+            moe_config=self.moe_config if use_moe else None,
         )
-        
-        # Create feed-forward layer (which may be MoE)
-        if layer_idx in self.moe_layers:
-            # Use MoE for feed-forward based on routing type
-            if self.routing_type == "rd_esi":
-                ffn = CustomMoELayer(
-                    hidden_size=self.hidden_size,
-                    intermediate_size=self.intermediate_size,
-                    **self.moe_config,
-                )
-            elif self.routing_type == "top_k":
-                # Extract top_k specific parameters
-                top_k = self.moe_config.get("top_k", 2)
-                num_experts = self.moe_config.get("num_experts", 16)
-                router_config = self.moe_config.get("router_config", {})
-                expert_dropout = self.moe_config.get("expert_dropout", 0.0)
-                
-                ffn = TopKGatingMoELayer(
-                    hidden_size=self.hidden_size,
-                    intermediate_size=self.intermediate_size,
-                    num_experts=num_experts,
-                    top_k=top_k,
-                    use_aux_loss=router_config.get("use_aux_loss", True),
-                    aux_loss_weight=router_config.get("aux_loss_weight", 0.01),
-                    expert_dropout=expert_dropout,
-                )
-            elif self.routing_type == "expert_choice":
-                # Extract expert choice specific parameters
-                num_experts = self.moe_config.get("num_experts", 16)
-                router_config = self.moe_config.get("router_config", {})
-                expert_dropout = self.moe_config.get("expert_dropout", 0.0)
-                
-                ffn = ExpertChoiceMoELayer(
-                    hidden_size=self.hidden_size,
-                    intermediate_size=self.intermediate_size,
-                    num_experts=num_experts,
-                    capacity_factor=router_config.get("capacity_factor", 1.0),
-                    expert_dropout=expert_dropout,
-                )
-            else:
-                raise ValueError(f"Unknown routing type: {self.routing_type}")
-                
-            is_moe_layer = True
-        else:
-            # Use standard feed-forward
-            ffn = nn.Sequential(
-                nn.Linear(self.hidden_size, self.intermediate_size),
-                nn.GELU(),
-                nn.Linear(self.intermediate_size, self.hidden_size),
-                nn.Dropout(self.dropout),
-            )
-            is_moe_layer = False
-        
-        # Create layer normalization
-        ln1 = nn.LayerNorm(self.hidden_size)
-        ln2 = nn.LayerNorm(self.hidden_size)
-        
-        # Return as dictionary
-        return {
-            "attention": attention,
-            "ffn": ffn,
-            "ln1": ln1,
-            "ln2": ln2,
-            "is_moe_layer": is_moe_layer,
-        }
         
     def forward(
         self,
@@ -564,96 +507,79 @@ class CustomMoETransformer(nn.Module):
         Returns:
             Dictionary with model outputs including loss if labels are provided
         """
-        batch_size, sequence_length = input_ids.shape
+        batch_size, seq_length = input_ids.shape
+        device = input_ids.device
         
         # Create position ids
-        position_ids = torch.arange(0, sequence_length, dtype=torch.long, device=input_ids.device)
-        position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+        position_ids = torch.arange(seq_length, dtype=torch.long, device=device).unsqueeze(0).expand(batch_size, -1)
         
         # Get embeddings
         token_embeds = self.token_embeddings(input_ids)
         position_embeds = self.position_embeddings(position_ids)
         
         # Combine embeddings
-        h = token_embeds + position_embeds
-        h = self.dropout_layer(h)
+        hidden_states = token_embeds + position_embeds
+        hidden_states = self.dropout_layer(hidden_states)
         
-        # Create attention mask for transformer
+        # Create attention mask if needed
         if attention_mask is None:
-            # Default to causal mask
-            attention_mask = torch.ones_like(input_ids)
+            attention_mask = torch.ones(batch_size, seq_length, device=device)
+            
+        # Create causal mask for autoregressive language modeling
+        # This ensures each token can only attend to previous tokens
+        seq_length = hidden_states.size(1)
+        causal_mask = torch.tril(torch.ones(seq_length, seq_length, device=device))
+        causal_mask = causal_mask.unsqueeze(0).unsqueeze(1)  # [1, 1, seq_length, seq_length]
         
-        # Convert to attention mask expected by nn.MultiheadAttention
-        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-        extended_attention_mask = extended_attention_mask.to(dtype=h.dtype)
-        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+        # Combine with attention mask (1 = attend, 0 = mask)
+        # First convert attention_mask from [batch_size, seq_length] to [batch_size, 1, 1, seq_length]
+        attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        # Combine masks: both must be 1 to attend
+        combined_mask = causal_mask * attention_mask
+        # Convert to format expected by attention mechanism (0 = attend, large negative = mask)
+        attention_mask = (1.0 - combined_mask) * -10000.0
         
-        # Create causal mask
-        causal_mask = torch.triu(torch.ones(sequence_length, sequence_length, device=h.device), diagonal=1)
-        causal_mask = causal_mask.masked_fill(causal_mask == 1, float("-inf"))
+        # Precompute freqs_cis for rotary embeddings
+        freqs_cis = precompute_freqs_cis(self.hidden_size // self.num_heads, self.max_seq_len).to(device)
         
         # Initialize auxiliary outputs
         aux_outputs = {}
         
-        # Process transformer layers
+        # Process through transformer layers
         for i, layer in enumerate(self.layers):
-            # Layer normalization and attention
-            h_ln1 = layer["ln1"](h)
-            attn_output, _ = layer["attention"](
-                query=h_ln1,
-                key=h_ln1,
-                value=h_ln1,
-                attn_mask=causal_mask,
-                key_padding_mask=~attention_mask.bool() if attention_mask is not None else None,
+            # Apply transformer layer
+            hidden_states, layer_aux = layer(
+                hidden_states,
+                freqs_cis=freqs_cis,
+                attention_mask=attention_mask,
+                position_ids=position_ids
             )
-            h = h + attn_output
             
-            # Layer normalization and feed-forward (which may be MoE)
-            h_ln2 = layer["ln2"](h)
-            if layer["is_moe_layer"]:
-                # MoE feed-forward
-                ffn_output, ffn_aux = layer["ffn"](h_ln2)
-                # Store auxiliary outputs
-                aux_outputs[f"layer_{i}_moe"] = ffn_aux
-            else:
-                # Standard feed-forward
-                ffn_output = layer["ffn"](h_ln2)
-            
-            h = h + ffn_output
+            # Store auxiliary outputs for this layer if any
+            if layer_aux is not None:
+                aux_outputs[f"layer_{i}"] = layer_aux
         
-        # Final layer normalization
-        h = self.ln_f(h)
+        # Apply final layer normalization
+        hidden_states = self.ln_f(hidden_states)
         
-        # Language modeling head
-        logits = self.lm_head(h)
+        # Get logits
+        logits = self.lm_head(hidden_states)
         
-        # Compute loss if labels are provided
+        # Calculate loss if labels are provided
         loss = None
         if labels is not None:
-            # Shift logits and labels for next-token prediction
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
+            # Shift logits and labels for next token prediction
+            shift_logits = logits[:, :-1, :].contiguous()
+            shift_labels = labels[:, 1:].contiguous()
             
-            # Compute loss
+            # Calculate cross entropy loss
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(
-                shift_logits.view(-1, self.vocab_size),
-                shift_labels.view(-1),
-            )
-            
-            # Add auxiliary losses if any
-            aux_loss = 0.0
-            for layer_aux in aux_outputs.values():
-                if "router_aux" in layer_aux and "aux_loss" in layer_aux["router_aux"]:
-                    aux_loss += layer_aux["router_aux"]["aux_loss"]
-            
-            if aux_loss > 0.0:
-                loss += aux_loss
+            loss = loss_fct(shift_logits.view(-1, self.vocab_size), shift_labels.view(-1))
         
         # Prepare outputs
         outputs = {
             "logits": logits,
-            "last_hidden_state": h,
+            "last_hidden_state": hidden_states,
         }
         
         if loss is not None:
