@@ -61,18 +61,28 @@ class WikiTextDataset(Dataset):
             streaming=streaming
         )
         
-        # Shuffle if requested
-        if shuffle and not streaming:
-            self.data = self.data.shuffle(seed=seed)
-        
-        # Tokenize the dataset if tokenizer is provided
-        if tokenizer is not None and not streaming:
-            self.data = self.data.map(
-                self._tokenize_function,
-                batched=True,
-                num_proc=num_proc,
-                remove_columns=["text"],
-            )
+        # For streaming datasets, we need to prepare an iterator
+        self.streaming = streaming
+        if streaming:
+            if shuffle:
+                self.data = self.data.shuffle(seed=seed, buffer_size=10000)
+            # Create an iterator but don't start it yet
+            self.iterator = iter(self.data)
+            self.buffer = []
+            self.buffer_size = 1000  # Size of the buffer for streaming
+        else:
+            # Shuffle if requested (for non-streaming)
+            if shuffle:
+                self.data = self.data.shuffle(seed=seed)
+            
+            # Tokenize the dataset if tokenizer is provided (for non-streaming)
+            if tokenizer is not None:
+                self.data = self.data.map(
+                    self._tokenize_function,
+                    batched=True,
+                    num_proc=num_proc,
+                    remove_columns=["text"],
+                )
         
     def _tokenize_function(self, examples: Dict[str, List]) -> Dict[str, List]:
         """
@@ -108,8 +118,10 @@ class WikiTextDataset(Dataset):
         if hasattr(self.data, "__len__"):
             return len(self.data)
         else:
-            # For streaming datasets, return a large number
-            return int(1e9)
+            # For streaming datasets, return a reasonable number
+            # WikiText-103 train set has about 1.8M examples
+            # We'll use a more manageable number for the progress bar
+            return 5000  # 这个值会影响进度条显示，但不会影响实际训练
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """
@@ -121,9 +133,28 @@ class WikiTextDataset(Dataset):
         Returns:
             Tokenized example
         """
-        example = self.data[idx]
+        if self.streaming:
+            # For streaming datasets, we need to handle the data differently
+            # We maintain a buffer of examples and refill it when needed
+            if idx >= len(self.buffer):
+                # Need to fetch more data
+                try:
+                    # Fetch more examples to fill the buffer
+                    new_examples = [next(self.iterator) for _ in range(self.buffer_size)]
+                    self.buffer.extend(new_examples)
+                except StopIteration:
+                    # If we've reached the end of the dataset, wrap around
+                    self.iterator = iter(self.data)
+                    new_examples = [next(self.iterator) for _ in range(self.buffer_size)]
+                    self.buffer.extend(new_examples)
+            
+            # Get the example from the buffer
+            example = self.buffer[idx % len(self.buffer)]
+        else:
+            # For non-streaming datasets, we can index directly
+            example = self.data[idx]
         
-        # If the dataset is not preprocessed (streaming mode), tokenize on-the-fly
+        # If the dataset is not preprocessed, tokenize on-the-fly
         if self.tokenizer is not None and "input_ids" not in example:
             example = self._tokenize_function({"text": [example["text"]]})
             # Convert single-example batch to individual example

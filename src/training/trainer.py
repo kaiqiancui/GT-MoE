@@ -88,6 +88,33 @@ class Trainer:
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
         
+        # Set up performance optimization options
+        self.use_amp = self.config.get("use_amp", False)
+        self.use_flash_attention = self.config.get("use_flash_attention", False)
+        self.use_checkpoint = self.config.get("use_checkpoint", False)
+        self.optimizer_states_on_cpu = self.config.get("optimizer_states_on_cpu", False)
+        self.cuda_deterministic = self.config.get("cuda_deterministic", True)
+        self.benchmark_cudnn = self.config.get("benchmark_cudnn", False)
+        self.save_only_last = self.config.get("save_only_last", False)
+        self.save_optimizer = self.config.get("save_optimizer", True)
+        
+        # Setup automatic mixed precision if enabled
+        self.scaler = None
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+            self.logger.info("Automatic Mixed Precision (AMP) training enabled")
+        
+        # Configure CUDA settings for performance
+        if torch.cuda.is_available():
+            if not self.cuda_deterministic:
+                torch.backends.cudnn.deterministic = False
+                torch.backends.cudnn.benchmark = self.benchmark_cudnn
+                self.logger.info(f"CUDA non-deterministic mode enabled, cuDNN benchmark: {self.benchmark_cudnn}")
+            else:
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+                self.logger.info("CUDA deterministic mode enabled (slower but reproducible)")
+        
         # Set up wandb if enabled
         self.use_wandb = self.config.get("use_wandb", False)
         if self.use_wandb:
@@ -111,8 +138,10 @@ class Trainer:
             "expert_load_variance": [],
             "expert_load_cv": [],
             "expert_load_entropy": [],
+            "gpu_memory_usage": [],
+            "training_speed": [],  # 记录每秒处理的样本数
         }
-        
+    
     def train(self) -> Dict[str, List[float]]:
         """
         Train the model.
@@ -129,15 +158,26 @@ class Trainer:
         eval_interval = self.config.get("eval_interval", 100)
         save_interval = self.config.get("save_interval", 500)
         
-        # Initialize step counter
+        # Initialize step counter and timing variables
         global_step = 0
+        samples_processed = 0
+        training_start_time = time.time()
+        last_log_time = training_start_time
         
         # Training loop
         self.logger.info("Starting training...")
+        self.logger.info(f"Using automatic mixed precision: {self.use_amp}")
+        self.logger.info(f"Using flash attention: {self.use_flash_attention}")
+        self.logger.info(f"Using gradient checkpointing: {self.use_checkpoint}")
+        
         for epoch in range(num_epochs):
             self.model.train()
             epoch_loss = 0.0
             step_loss = 0.0
+            
+            # Enable gradient checkpointing if configured
+            if self.use_checkpoint and hasattr(self.model, "gradient_checkpointing_enable"):
+                self.model.gradient_checkpointing_enable()
             
             # Progress bar for training
             progress_bar = tqdm(self.train_dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
@@ -146,26 +186,47 @@ class Trainer:
                 # Move batch to device
                 batch = {k: v.to(self.device) for k, v in batch.items() if k in ["input_ids", "attention_mask", "labels"]}
                 
-                # Forward pass
-                outputs = self.model(**batch)
-                loss = outputs["loss"]
+                # Track batch size for throughput calculation
+                batch_size = batch["input_ids"].size(0)
+                samples_processed += batch_size
                 
-                # Scale loss for gradient accumulation
-                loss = loss / gradient_accumulation_steps
-                
-                # Backward pass
-                loss.backward()
+                # Forward and backward pass with AMP if enabled
+                if self.use_amp:
+                    with torch.cuda.amp.autocast():
+                        outputs = self.model(**batch)
+                        loss = outputs["loss"]
+                        # Scale loss for gradient accumulation
+                        loss = loss / gradient_accumulation_steps
+                    
+                    # Backward pass with scaler
+                    self.scaler.scale(loss).backward()
+                else:
+                    # Standard forward pass
+                    outputs = self.model(**batch)
+                    loss = outputs["loss"]
+                    # Scale loss for gradient accumulation
+                    loss = loss / gradient_accumulation_steps
+                    loss.backward()
                 
                 # Update step loss
                 step_loss += loss.item()
                 
                 # Update parameters if gradient accumulation is complete
                 if (step + 1) % gradient_accumulation_steps == 0:
-                    # Clip gradients
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
+                    # Clip gradients (with AMP if enabled)
+                    if self.use_amp:
+                        self.scaler.unscale_(self.optimizer)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
+                        
+                        # Update parameters with scaler
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                    else:
+                        # Standard gradient clipping and optimizer step
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
+                        self.optimizer.step()
                     
-                    # Update parameters
-                    self.optimizer.step()
+                    # Update learning rate
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
                     
@@ -178,6 +239,20 @@ class Trainer:
                         expert_loads = self._get_expert_loads()
                         load_metrics = calculate_load_metrics(expert_loads)
                         
+                        # Calculate training speed (samples/second)
+                        current_time = time.time()
+                        elapsed_time = current_time - last_log_time
+                        if elapsed_time > 0:
+                            samples_per_second = (batch_size * gradient_accumulation_steps * log_interval) / elapsed_time
+                            self.metrics["training_speed"].append(samples_per_second)
+                        last_log_time = current_time
+                        
+                        # Get GPU memory usage
+                        if torch.cuda.is_available():
+                            gpu_memory_used = torch.cuda.max_memory_allocated(self.device) / (1024 ** 3)  # GB
+                            self.metrics["gpu_memory_usage"].append(gpu_memory_used)
+                            torch.cuda.reset_peak_memory_stats(self.device)
+                        
                         # Update metrics
                         self.metrics["train_loss"].append(step_loss * gradient_accumulation_steps)
                         self.metrics["expert_load_variance"].append(load_metrics["variance"])
@@ -186,21 +261,31 @@ class Trainer:
                         
                         # Log to progress bar
                         progress_bar.set_postfix({
-                            "loss": step_loss * gradient_accumulation_steps,
-                            "lr": self.lr_scheduler.get_last_lr()[0],
+                            "loss": f"{step_loss * gradient_accumulation_steps:.4f}",
+                            "lr": f"{self.lr_scheduler.get_last_lr()[0]:.6f}",
                             "step": global_step,
+                            "samples/s": f"{samples_per_second:.1f}" if 'samples_per_second' in locals() else "N/A",
+                            "GPU mem": f"{gpu_memory_used:.2f}GB" if 'gpu_memory_used' in locals() else "N/A",
                         })
                         
                         # Log to wandb
                         if self.use_wandb:
-                            wandb.log({
+                            log_dict = {
                                 "train/loss": step_loss * gradient_accumulation_steps,
                                 "train/learning_rate": self.lr_scheduler.get_last_lr()[0],
                                 "train/expert_load_variance": load_metrics["variance"],
                                 "train/expert_load_cv": load_metrics["cv"],
                                 "train/expert_load_entropy": load_metrics["entropy"],
                                 "train/step": global_step,
-                            })
+                            }
+                            
+                            if 'samples_per_second' in locals():
+                                log_dict["train/samples_per_second"] = samples_per_second
+                            
+                            if 'gpu_memory_used' in locals():
+                                log_dict["train/gpu_memory_used_gb"] = gpu_memory_used
+                            
+                            wandb.log(log_dict)
                         
                         # Reset step loss
                         step_loss = 0.0
@@ -370,11 +455,28 @@ class Trainer:
         # Save model
         self.model.save_pretrained(path)
         
-        # Save optimizer and scheduler
-        torch.save({
-            "optimizer": self.optimizer.state_dict(),
-            "lr_scheduler": self.lr_scheduler.state_dict(),
-        }, os.path.join(path, "optimizer.pt"))
+        # Save optimizer and scheduler if configured
+        if self.save_optimizer:
+            # Move optimizer states to CPU if configured to avoid OOM
+            if self.optimizer_states_on_cpu:
+                optimizer_state = {k: v.cpu() if isinstance(v, torch.Tensor) else v 
+                                  for k, v in self.optimizer.state_dict().items()}
+                lr_scheduler_state = self.lr_scheduler.state_dict()
+            else:
+                optimizer_state = self.optimizer.state_dict()
+                lr_scheduler_state = self.lr_scheduler.state_dict()
+            
+            torch.save({
+                "optimizer": optimizer_state,
+                "lr_scheduler": lr_scheduler_state,
+                "scaler": self.scaler.state_dict() if self.scaler is not None else None,
+            }, os.path.join(path, "optimizer.pt"))
+        
+        # Save training metrics
+        save_metrics_to_json(
+            self.metrics,
+            os.path.join(path, "training_metrics.json"),
+        )
         
         self.logger.info(f"Checkpoint saved to {path}")
     

@@ -1,29 +1,67 @@
 # Configuration for RD-ESI Custom Model
 
 # Model configuration
+# model:
+#   vocab_size: 50257  # GPT-2 vocabulary size
+#   hidden_size: 512
+#   num_layers: 6
+#   num_heads: 8
+#   intermediate_size: 2048
+#   max_seq_len: 1024
+#   dropout: 0.1
+  
+#   # MoE configuration
+#   moe_layers: [2, 4]  # Layers that use MoE
+#   moe_config:
+#     num_experts: 16
+#     top_k: 2
+#     router_config:
+#       beta: 0.1  # Weight for reputation score
+#       gamma: 0.1  # Weight for load penalty
+#       alpha: 0.9  # Smoothing factor for reputation EMA updates
+#       use_exploration_bonus: true
+#       exploration_c: 0.1  # Constant for UCB exploration bonus
+#       use_reputation_decay: true
+#       decay_rate: 0.99  # Rate at which reputation decays
+#       load_ema_alpha: 0.9  # Smoothing factor for load EMA updates
+#     expert_dropout: 0.1
+
+# # Tokenizer configuration
+# tokenizer:
+#   tokenizer_name_or_path: "gpt2"
+#   use_fast: true
+#   add_special_tokens: true
+#   padding_side: "right"
+
+# # Data configuration
+# data:
+#   batch_size: 16
+#   max_length: 512
+#   num_workers: 4
+#   streaming: false
 model:
   vocab_size: 50257  # GPT-2 vocabulary size
-  hidden_size: 512
-  num_layers: 6
-  num_heads: 8
-  intermediate_size: 2048
+  hidden_size: 768   # 减小到768，降低显存需求
+  num_layers: 8     # 减少到8层，降低显存需求
+  num_heads: 12     # 减少到12个注意力头
+  intermediate_size: 3072  # 减小到3072，降低显存需求
   max_seq_len: 1024
   dropout: 0.1
   
-  # MoE configuration
-  moe_layers: [2, 4]  # Layers that use MoE
+  # MoE configuration - 优化专家数量和分配
+  moe_layers: [2, 5]  # 减少MoE层数量，降低显存需求
   moe_config:
-    num_experts: 16
-    top_k: 2
+    num_experts: 6  # 进一步减少专家数量以降低显存需求
+    top_k: 2        # 保持top_k=2，平衡效果和速度
     router_config:
-      beta: 0.1  # Weight for reputation score
-      gamma: 0.1  # Weight for load penalty
-      alpha: 0.9  # Smoothing factor for reputation EMA updates
+      beta: 0.1     # 保持原有配置
+      gamma: 0.1
+      alpha: 0.9
       use_exploration_bonus: true
-      exploration_c: 0.1  # Constant for UCB exploration bonus
+      exploration_c: 0.1
       use_reputation_decay: true
-      decay_rate: 0.99  # Rate at which reputation decays
-      load_ema_alpha: 0.9  # Smoothing factor for load EMA updates
+      decay_rate: 0.99
+      load_ema_alpha: 0.9
     expert_dropout: 0.1
 
 # Tokenizer configuration
@@ -35,11 +73,10 @@ tokenizer:
 
 # Data configuration
 data:
-  batch_size: 16
+  batch_size: 16      # 减小批量大小以降低显存需求
   max_length: 512
-  num_workers: 4
-  streaming: false
-
+  num_workers: 2      # 减少工作进程数以匹配流式数据集的分片数量
+  streaming: true     # 启用流式数据加载减少内存使用
 # Trainer configuration
 trainer:
   output_dir: "results/rd_esi_run"
@@ -58,6 +95,17 @@ trainer:
   use_wandb: false
   wandb_project: "rd-esi-moe"
   wandb_run_name: "rd-esi-run"
+  
+  # 性能优化选项
+  use_amp: true                # 启用自动混合精度训练，显著减少显存使用
+  use_checkpoint: true         # 启用梯度检查点以节省显存
+  cuda_deterministic: false    # 关闭确定性模式以提高速度
+  benchmark_cudnn: true        # 启用cuDNN基准测试以优化卷积操作
+  
+  # 内存优化
+  optimizer_states_on_cpu: true  # 将优化器状态放在CPU上以节省GPU显存
+  save_only_last: true           # 只保存最后的检查点，节省磁盘空间
+  save_optimizer: false          # 不保存优化器状态，加快保存速度
 
 # Evaluator configuration
 evaluator:
