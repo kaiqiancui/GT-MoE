@@ -75,18 +75,18 @@ tokenizer:
 data:
   batch_size: 16      # 减小批量大小以降低显存需求
   max_length: 512
-  num_workers: 2      # 减少工作进程数以匹配流式数据集的分片数量
-  streaming: true     # 启用流式数据加载减少内存使用
+  num_workers: 4      # 增加工作进程数以加快数据加载
+  streaming: false    # 禁用流式数据加载，使用预先下载的数据集
 # Trainer configuration
 trainer:
   output_dir: "results/rd_esi_run"
   device: "cuda:3"  # or "cpu" if no GPU available
   optimizer: "adamw"
-  learning_rate: 5e-5
+  learning_rate: 1e-6  # 大幅降低初始学习率，从头开始训练时需要更小的学习率
   weight_decay: 0.01
   lr_scheduler: "cosine"
-  warmup_steps: 100
-  max_steps: 5000
+  warmup_steps: 2000  # 显著增加预热步数，给模型更多时间适应
+  max_steps: 1500000  # 增加训练步数以确保模型充分学习
   gradient_accumulation_steps: 4
   max_grad_norm: 1.0
   log_interval: 10
@@ -105,7 +105,7 @@ trainer:
   # 内存优化
   optimizer_states_on_cpu: true  # 将优化器状态放在CPU上以节省GPU显存
   save_only_last: true           # 只保存最后的检查点，节省磁盘空间
-  save_optimizer: false          # 不保存优化器状态，加快保存速度
+  save_optimizer: true           # 保存优化器状态，支持断点续训
 
 # Evaluator configuration
 evaluator:

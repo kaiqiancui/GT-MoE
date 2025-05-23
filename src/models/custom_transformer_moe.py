@@ -451,6 +451,10 @@ class CustomMoETransformer(nn.Module):
         # Initialize weights
         self.apply(self._init_weights)
         
+        # Weight tying: 将token嵌入层的权重与输出层的权重绑定
+        # 这是语言模型中的一种常见做法，可以减少参数数量并提高性能
+        self.lm_head.weight = self.token_embeddings.weight
+        
     def _init_weights(self, module):
         """
         Initialize weights for the model.
@@ -458,10 +462,15 @@ class CustomMoETransformer(nn.Module):
         Args:
             module: Module to initialize
         """
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if isinstance(module, nn.Linear) and module.bias is not None:
+        if isinstance(module, nn.Linear):
+            # 使用更小的标准差进行初始化，以减小初始损失
+            # 根据输入维度缩放标准差，这是一种常用的做法
+            std = 0.02 / math.sqrt(self.hidden_size)
+            module.weight.data.normal_(mean=0.0, std=std)
+            if module.bias is not None:
                 module.bias.data.zero_()
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=0.02)
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
@@ -573,7 +582,8 @@ class CustomMoETransformer(nn.Module):
             shift_labels = labels[:, 1:].contiguous()
             
             # Calculate cross entropy loss
-            loss_fct = nn.CrossEntropyLoss()
+            # 使用ignore_index=-100，确保标签为-100的位置（填充标记）不参与损失计算
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(shift_logits.view(-1, self.vocab_size), shift_labels.view(-1))
         
         # Prepare outputs

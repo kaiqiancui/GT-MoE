@@ -23,7 +23,7 @@ class WikiTextDataset(Dataset):
         tokenizer: PreTrainedTokenizerBase = None,
         max_length: int = 512,
         return_tensors: bool = True,
-        streaming: bool = False,
+        streaming: bool = False, # 保持此参数，但逻辑上现在只处理 streaming=False
         num_proc: int = 4,
         shuffle: bool = True,
         seed: int = 42,
@@ -36,7 +36,7 @@ class WikiTextDataset(Dataset):
             tokenizer: Tokenizer for encoding text
             max_length: Maximum sequence length
             return_tensors: Whether to return tensors or lists
-            streaming: Whether to use streaming mode
+            streaming: Whether to use streaming mode (ignored, always False)
             num_proc: Number of processes for preprocessing
             shuffle: Whether to shuffle the dataset
             seed: Random seed
@@ -53,36 +53,28 @@ class WikiTextDataset(Dataset):
         else:
             dataset_split = "train"
         
-        # Load the dataset
+        # Load the dataset (明确设置为 streaming=False)
         self.data = load_dataset(
             "Salesforce/wikitext", 
             "wikitext-103-raw-v1", 
             split=dataset_split, 
-            streaming=streaming
+            streaming=False, # 明确设置为 False
+            cache_dir="/disks/sata2/kaiqian/.cache/huggingface/datasets" 
         )
         
-        # For streaming datasets, we need to prepare an iterator
-        self.streaming = streaming
-        if streaming:
-            if shuffle:
-                self.data = self.data.shuffle(seed=seed, buffer_size=10000)
-            # Create an iterator but don't start it yet
-            self.iterator = iter(self.data)
-            self.buffer = []
-            self.buffer_size = 1000  # Size of the buffer for streaming
-        else:
-            # Shuffle if requested (for non-streaming)
-            if shuffle:
-                self.data = self.data.shuffle(seed=seed)
-            
-            # Tokenize the dataset if tokenizer is provided (for non-streaming)
-            if tokenizer is not None:
-                self.data = self.data.map(
-                    self._tokenize_function,
-                    batched=True,
-                    num_proc=num_proc,
-                    remove_columns=["text"],
-                )
+        # Shuffle if requested
+        if shuffle:
+            self.data = self.data.shuffle(seed=seed)
+        
+        # Tokenize the dataset if tokenizer is provided
+        if tokenizer is not None:
+            self.data = self.data.map(
+                self._tokenize_function,
+                batched=True,
+                num_proc=num_proc,
+                remove_columns=["text"],
+                load_from_cache_file=False, # <-- 关键修改：强制重新处理数据集，忽略旧缓存
+            )
         
     def _tokenize_function(self, examples: Dict[str, List]) -> Dict[str, List]:
         """
@@ -106,6 +98,14 @@ class WikiTextDataset(Dataset):
         # Prepare labels for language modeling (same as input_ids)
         tokenized["labels"] = tokenized["input_ids"].clone()
         
+        # IMPORTANT: Set labels for padding tokens to -100 so they are ignored in loss calculation
+        # This assumes tokenizer.pad_token_id is correctly set (e.g., in tokenizer_utils.py)
+        if self.tokenizer.pad_token_id is not None:
+            # Mask out padding tokens from labels (attention_mask == 0 means it's a padding token)
+            tokenized["labels"][tokenized["attention_mask"] == 0] = -100
+        # For tokens beyond max_length that are truncated, their corresponding labels are naturally ignored
+        # as they are not part of the input_ids.
+        
         return tokenized
     
     def __len__(self) -> int:
@@ -115,13 +115,8 @@ class WikiTextDataset(Dataset):
         Returns:
             Number of examples in the dataset
         """
-        if hasattr(self.data, "__len__"):
-            return len(self.data)
-        else:
-            # For streaming datasets, return a reasonable number
-            # WikiText-103 train set has about 1.8M examples
-            # We'll use a more manageable number for the progress bar
-            return 5000  # 这个值会影响进度条显示，但不会影响实际训练
+        # 在非流式模式下，self.data 是一个 Map-style Dataset，可以直接获取其长度
+        return len(self.data)
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """
@@ -133,35 +128,19 @@ class WikiTextDataset(Dataset):
         Returns:
             Tokenized example
         """
-        if self.streaming:
-            # For streaming datasets, we need to handle the data differently
-            # We maintain a buffer of examples and refill it when needed
-            if idx >= len(self.buffer):
-                # Need to fetch more data
-                try:
-                    # Fetch more examples to fill the buffer
-                    new_examples = [next(self.iterator) for _ in range(self.buffer_size)]
-                    self.buffer.extend(new_examples)
-                except StopIteration:
-                    # If we've reached the end of the dataset, wrap around
-                    self.iterator = iter(self.data)
-                    new_examples = [next(self.iterator) for _ in range(self.buffer_size)]
-                    self.buffer.extend(new_examples)
-            
-            # Get the example from the buffer
-            example = self.buffer[idx % len(self.buffer)]
-        else:
-            # For non-streaming datasets, we can index directly
-            example = self.data[idx]
+        # For non-streaming datasets, we can index directly
+        example = self.data[idx]
         
-        # If the dataset is not preprocessed, tokenize on-the-fly
+        # If the dataset was not preprocessed (e.g., tokenizer was None in __init__), tokenize on-the-fly
+        # This block should ideally not be hit if tokenizer is provided in __init__ and data is pre-mapped.
         if self.tokenizer is not None and "input_ids" not in example:
             example = self._tokenize_function({"text": [example["text"]]})
             # Convert single-example batch to individual example
             example = {k: v[0] for k, v in example.items()}
         
-        # Convert to tensors if needed
+        # Convert to tensors if needed (this is still necessary as _tokenize_function might return lists if return_tensors is None)
         if self.return_tensors and not isinstance(example["input_ids"], torch.Tensor):
+            # Ensure all relevant keys are converted to tensors
             example = {k: torch.tensor(v) for k, v in example.items() if k in ["input_ids", "attention_mask", "labels"]}
         
         return example
