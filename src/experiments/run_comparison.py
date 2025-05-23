@@ -22,7 +22,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.custom_transformer_moe import CustomMoETransformer
-from data_utils.c4_tiny_loader import create_c4_tiny_dataloaders
+from data_utils.openwebtext_loader import create_openwebtext_dataloaders
 from data_utils.tokenizer_utils import load_tokenizer
 from training.trainer import Trainer
 from evaluation.evaluator import Evaluator
@@ -173,7 +173,7 @@ def run_experiment(mechanism: str, args: argparse.Namespace) -> Dict[str, Any]:
     
     # Create dataloaders
     data_config = config.get("data", {})
-    train_dataloader, val_dataloader, test_dataloader = create_c4_tiny_dataloaders(
+    train_dataloader, val_dataloader, test_dataloader = create_openwebtext_dataloaders(
         tokenizer=tokenizer,
         **data_config,
     )
