@@ -279,6 +279,7 @@ def create_c4_dataloaders(
     max_length: int = 512,
     num_workers: int = 4,
     streaming: bool = True,
+    processed_data_path: str = None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     Create DataLoaders for the C4 dataset.
@@ -289,55 +290,108 @@ def create_c4_dataloaders(
         max_length: Maximum sequence length
         num_workers: Number of workers for data loading
         streaming: Whether to use streaming mode
+        processed_data_path: Path to preprocessed dataset (if available)
         
     Returns:
         Tuple of (train_dataloader, val_dataloader, test_dataloader)
     """
-    # Create datasets
-    if streaming:
-        train_dataset = C4Dataset(
-            split="train",
-            tokenizer=tokenizer,
-            max_length=max_length,
-            streaming=streaming,
-        )
+    # Check if preprocessed data is available
+    if processed_data_path and os.path.exists(processed_data_path):
+        # Load preprocessed data from disk
+        print(f"Loading pre-tokenized dataset from '{processed_data_path}'...")
+        from datasets import load_from_disk
         
-        val_dataset = C4Dataset(
-            split="validation",
-            tokenizer=tokenizer,
-            max_length=max_length,
-            streaming=streaming,
-        )
-        
-        # C4 doesn't have a test split, so we use validation for test as well
-        test_dataset = C4Dataset(
-            split="validation",
-            tokenizer=tokenizer,
-            max_length=max_length,
-            streaming=streaming,
-        )
-    else:
-        train_dataset = C4MapDataset(
-            split="train",
-            tokenizer=tokenizer,
-            max_length=max_length,
-            streaming=streaming,
-        )
-        
-        val_dataset = C4MapDataset(
-            split="validation",
-            tokenizer=tokenizer,
-            max_length=max_length,
-            streaming=streaming,
-        )
-        
-        # C4 doesn't have a test split, so we use validation for test as well
-        test_dataset = C4MapDataset(
-            split="validation",
-            tokenizer=tokenizer,
-            max_length=max_length,
-            streaming=streaming,
-        )
+        try:
+            tokenized_dataset = load_from_disk(processed_data_path)
+            print("Dataset loaded successfully.")
+            
+            # Split dataset into train/val/test
+            # First split into train and temp (99% train, 1% temp)
+            split_dataset = tokenized_dataset.train_test_split(test_size=0.01, seed=42)
+            train_dataset = split_dataset['train']
+            
+            # Then split temp into val and test (50% val, 50% test)
+            temp_dataset = split_dataset['test']
+            val_test_split = temp_dataset.train_test_split(test_size=0.5, seed=42)
+            val_dataset = val_test_split['train']
+            test_dataset = val_test_split['test']
+            
+            print(f"Dataset split into: {len(train_dataset)} train, {len(val_dataset)} val, {len(test_dataset)} test examples")
+            
+            # Create PyTorch datasets
+            from torch.utils.data import TensorDataset
+            
+            # Ensure labels are created for language modeling
+            def prepare_lm_dataset(dataset):
+                # Create labels (shift input_ids right)
+                labels = dataset['input_ids'].clone()
+                
+                # Set padding tokens to -100 so they're ignored in loss calculation
+                if tokenizer.pad_token_id is not None:
+                    labels[dataset['attention_mask'] == 0] = -100
+                    
+                return TensorDataset(dataset['input_ids'], dataset['attention_mask'], labels)
+            
+            # Use map-style datasets for preprocessed data
+            streaming = False
+            
+            # Create TensorDatasets
+            train_dataset = prepare_lm_dataset(train_dataset)
+            val_dataset = prepare_lm_dataset(val_dataset)
+            test_dataset = prepare_lm_dataset(test_dataset)
+            
+        except Exception as e:
+            print(f"Error loading preprocessed data: {e}")
+            print("Falling back to on-the-fly tokenization...")
+            processed_data_path = None
+    
+    # If no preprocessed data or loading failed, use original approach
+    if not processed_data_path or not os.path.exists(processed_data_path):
+        # Create datasets using the original approach
+        if streaming:
+            train_dataset = C4Dataset(
+                split="train",
+                tokenizer=tokenizer,
+                max_length=max_length,
+                streaming=streaming,
+            )
+            
+            val_dataset = C4Dataset(
+                split="validation",
+                tokenizer=tokenizer,
+                max_length=max_length,
+                streaming=streaming,
+            )
+            
+            # C4 doesn't have a test split, so we use validation for test as well
+            test_dataset = C4Dataset(
+                split="validation",
+                tokenizer=tokenizer,
+                max_length=max_length,
+                streaming=streaming,
+            )
+        else:
+            train_dataset = C4MapDataset(
+                split="train",
+                tokenizer=tokenizer,
+                max_length=max_length,
+                streaming=streaming,
+            )
+            
+            val_dataset = C4MapDataset(
+                split="validation",
+                tokenizer=tokenizer,
+                max_length=max_length,
+                streaming=streaming,
+            )
+            
+            # C4 doesn't have a test split, so we use validation for test as well
+            test_dataset = C4MapDataset(
+                split="validation",
+                tokenizer=tokenizer,
+                max_length=max_length,
+                streaming=streaming,
+            )
     
     # Create dataloaders
     train_dataloader = DataLoader(

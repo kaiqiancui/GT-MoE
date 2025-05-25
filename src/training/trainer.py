@@ -197,21 +197,36 @@ class Trainer:
                 if self.use_amp:
                     with torch.amp.autocast('cuda'):  # 使用新的推荐用法
                         outputs = self.model(**batch)
-                        
-
-                        
                         loss = outputs["loss"]
-                        # Scale loss for gradient accumulation
-                        loss = loss / gradient_accumulation_steps
-                    
-                    # Backward pass with scaler
-                    self.scaler.scale(loss).backward()
                 else:
                     # Standard forward pass
                     outputs = self.model(**batch)
                     loss = outputs["loss"]
-                    # Scale loss for gradient accumulation
-                    loss = loss / gradient_accumulation_steps
+                
+                # --- IMPORTANT: Update MoE router states here ---
+                # FIX: Update router state for EVERY batch, immediately after the forward pass.
+                # This logic was moved from inside the gradient accumulation check.
+                if "aux_outputs" in outputs:
+                    for layer_id_str, layer_aux_outputs in outputs["aux_outputs"].items():
+                        layer_id = int(layer_id_str.split('_')[-1])
+                        ffn_module = self.model.layers[layer_id].ffn
+                        
+                        if hasattr(ffn_module, 'update_router_state') and layer_aux_outputs:
+                            ffn_module.update_router_state(
+                                expert_indices=layer_aux_outputs["expert_indices"],
+                                performance_metrics=layer_aux_outputs["performance_metrics"],
+                                batch_size=batch["input_ids"].size(0),
+                                sequence_length=batch["input_ids"].size(1),
+                            )
+                # --- End of MoE router state update ---
+                
+                # Scale loss for gradient accumulation
+                loss = loss / gradient_accumulation_steps
+                
+                # Backward pass
+                if self.use_amp:
+                    self.scaler.scale(loss).backward()
+                else:
                     loss.backward()
                 
                 # Update step loss
@@ -241,22 +256,8 @@ class Trainer:
                     # Update global step
                     global_step += 1
                     
-                    # --- IMPORTANT: Update MoE router states here ---
-                    # Assuming 'outputs' variable from the current forward pass is accessible
-                    if "aux_outputs" in outputs: 
-                        for layer_id in self.model.moe_layers:
-                            # Retrieve auxiliary outputs for this specific MoE layer
-                            layer_aux_outputs = outputs["aux_outputs"].get(f"layer_{layer_id}", None)
-                            
-                            # Check if this layer has MoE and its router needs state update
-                            if layer_aux_outputs and hasattr(self.model.layers[layer_id].ffn, 'update_router_state'):
-                                self.model.layers[layer_id].ffn.update_router_state(
-                                    expert_indices=layer_aux_outputs["expert_indices"],
-                                    performance_metrics=layer_aux_outputs["performance_metrics"],
-                                    batch_size=batch["input_ids"].size(0),
-                                    sequence_length=batch["input_ids"].size(1),
-                                )
-                    # --- End of MoE router state update ---
+                    # The router state update logic has been moved outside the gradient accumulation check
+                    # to ensure it runs for every batch. See the code above, after the forward pass.
                     
                     # Log training metrics
                     if global_step % log_interval == 0:

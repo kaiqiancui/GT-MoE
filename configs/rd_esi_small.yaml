@@ -33,11 +33,18 @@ tokenizer:
 
 # Data configuration
 data:
-  batch_size: 32              # 适当增大批次，充分利用GPU
-  max_length: 256             # 【关键】大幅缩短序列长度，这是提速最有效的方法
-  num_workers: 4
-  streaming: false
-
+  # Local data path configuration
+  local_data_path: "/disks/sata2/kaiqian/.cache/huggingface/hub/datasets--allenai--c4/snapshots/1588ec454efa1a09f29cd18ddd04fe05fc8653a2/en/"
+  num_files_to_load: 13
+  file_pattern: "c4-train.{i:05d}-of-01024.json.gz"
+  
+  # Processed data path for saving/loading tokenized data
+  processed_data_path: "./processed_data/c4_tokenized"
+  
+  # Training parameters
+  batch_size: 16
+  max_length: 512
+  num_workers: 8
 # Trainer configuration
 trainer:
   output_dir: "results/rd_esi_debug_run"

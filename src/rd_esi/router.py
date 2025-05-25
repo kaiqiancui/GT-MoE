@@ -170,12 +170,13 @@ class RDESIRouter(nn.Module):
         
         return routing_weights, expert_indices, aux_outputs
     
+    @torch.no_grad()
     def update_states(
         self,
         expert_indices: torch.Tensor,
         current_performances: torch.Tensor,
-        batch_size: int,
-        sequence_length: int,
+        batch_size: int = None,
+        sequence_length: int = None,
     ) -> None:
         """
         Update router states based on routing decisions and expert performances.
@@ -185,8 +186,8 @@ class RDESIRouter(nn.Module):
               containing indices of selected experts
             current_performances: Tensor of shape [batch_size, sequence_length, top_k]
               containing performance metrics for each selected expert
-            batch_size: Batch size
-            sequence_length: Sequence length
+            batch_size: Batch size (optional, will be inferred if not provided)
+            sequence_length: Sequence length (optional, will be inferred if not provided)
         """
         # Flatten indices for counting
         flat_indices = expert_indices.view(-1)
@@ -195,42 +196,46 @@ class RDESIRouter(nn.Module):
         new_counts = torch.bincount(flat_indices, minlength=self.num_experts).float()
         self.expert_counts.add_(new_counts)
         
+        # Infer batch_size and sequence_length if not provided
+        if batch_size is None or sequence_length is None:
+            batch_size, sequence_length = expert_indices.shape[0], expert_indices.shape[1]
+            
         # Update total routing decisions
         self.total_routing_decisions.add_(batch_size * sequence_length * self.top_k)
         
-        # Aggregate current performance metrics for each expert
-        # Initialize performance accumulator
-        performance_sum = torch.zeros_like(self.reputation_scores)
-        performance_count = torch.zeros_like(self.reputation_scores)
+        # --- START OF NEW, ROBUST IMPLEMENTATION ---
+        # FIX: Vectorized and safe calculation of mean performance per expert.
+        # This avoids loops and prevents NaN from experts not used in a batch.
         
-        # Reshape for easier processing
-        expert_indices_flat = expert_indices.view(-1, self.top_k)
-        current_performances_flat = current_performances.view(-1, self.top_k)
+        # Flatten the incoming tensors for easier processing
+        flat_indices = expert_indices.view(-1)
+        flat_performances = current_performances.view(-1)
+
+        # Create temporary tensors on the correct device to aggregate batch results
+        batch_perf_sum = torch.zeros_like(self.reputation_scores)
+        batch_counts = torch.zeros_like(self.reputation_scores) # Use float for accumulation
+
+        # Use scatter_add to sum performances and counts for each expert efficiently
+        batch_perf_sum.scatter_add_(0, flat_indices, flat_performances)
+        batch_counts.scatter_add_(0, flat_indices, torch.ones_like(flat_performances))
         
-        # For each token and selected expert, accumulate performance
-        for i in range(expert_indices_flat.size(0)):
-            for k in range(self.top_k):
-                expert_idx = expert_indices_flat[i, k].item()
-                performance = current_performances_flat[i, k].item()
-                performance_sum[expert_idx] += performance
-                performance_count[expert_idx] += 1
+        # Create a mask for experts that were actually used in this batch to avoid division by zero
+        used_experts_mask = batch_counts > 0
         
-        # Compute average performance for each expert
-        # Avoid division by zero
-        mask = performance_count > 0
-        avg_performance = torch.zeros_like(performance_sum)
-        avg_performance[mask] = performance_sum[mask] / performance_count[mask]
+        # Initialize current_performance_i with zeros; it will remain zero for unused experts
+        current_performance_i = torch.zeros_like(self.reputation_scores)
         
-        # Update reputation scores using EMA
-        # R_i(t) = α * current_performance_i + (1-α) * R_i(t-1)
-        self.reputation_scores = self.alpha * avg_performance + (1 - self.alpha) * self.reputation_scores
+        # Calculate mean performance only for the experts that were used
+        current_performance_i[used_experts_mask] = batch_perf_sum[used_experts_mask] / batch_counts[used_experts_mask]
+        # --- END OF NEW IMPLEMENTATION ---
         
-        # Apply reputation decay if enabled
+        # Update reputation using the safe current_performance_i tensor
         if self.use_reputation_decay:
-            # Decay reputation scores of experts that weren't selected in this batch
-            unused_mask = performance_count == 0
-            self.reputation_scores[unused_mask] *= self.decay_rate
-        
-        # Update expert loads based on current batch
-        # This is a simple approximation - in practice, more sophisticated load tracking might be used
-        self.expert_loads = self.load_ema_alpha * new_counts + (1 - self.load_ema_alpha) * self.expert_loads
+            self.reputation_scores *= self.decay_rate
+        self.reputation_scores = self.alpha * current_performance_i + (1 - self.alpha) * self.reputation_scores
+
+        # Update expert load and counts
+        if self.load_ema_alpha < 1.0:
+             self.expert_loads = self.load_ema_alpha * batch_counts + (1-self.load_ema_alpha) * self.expert_loads
+        else:
+            self.expert_loads = batch_counts
