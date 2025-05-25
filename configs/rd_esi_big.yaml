@@ -1,0 +1,74 @@
+# config_plan_C_ambitious.yaml
+model:
+  vocab_size: 50257
+  hidden_size: 768              # 保持您当前的“大”模型尺寸
+  num_layers: 8
+  num_heads: 12
+  intermediate_size: 3072
+  max_seq_len: 1024
+  dropout: 0.1
+  
+  # MoE configuration
+  moe_layers: [2, 5]
+  moe_config:
+    num_experts: 8              # 专家数可以适当减少以节约内存
+    top_k: 2
+    router_config:
+      beta: 0.1
+      gamma: 0.1
+      alpha: 0.9
+      use_exploration_bonus: true
+      exploration_c: 0.1
+      use_reputation_decay: true
+      decay_rate: 0.99
+      load_ema_alpha: 0.9
+    expert_dropout: 0.1
+
+# Tokenizer configuration
+tokenizer:
+  tokenizer_name_or_path: "gpt2"
+  use_fast: true
+  add_special_tokens: true
+  padding_side: "right"
+
+# Data configuration
+data:
+  batch_size: 8                 # 【关键】减小物理批量大小以适应大模型
+  max_length: 512
+  num_workers: 4
+  streaming: false
+
+# Trainer configuration
+trainer:
+  output_dir: "results/rd_esi_ambitious_run"
+  device: "cuda:3"
+  optimizer: "adamw"
+  learning_rate: 8e-5           # 学习率比方案B更小一些，因为模型更大
+  weight_decay: 0.01
+  lr_scheduler: "cosine"
+  warmup_steps: 5000
+  max_steps: 100000             # 训练更多步数
+  gradient_accumulation_steps: 8 # 【关键】增加累积步数，保持有效批量大小，但会减慢更新
+  max_grad_norm: 1.0
+  log_interval: 10
+  eval_interval: 500
+  save_interval: 1000
+  use_wandb: false
+  wandb_project: "rd-esi-moe"
+  wandb_run_name: "rd-esi-ambitious-run"
+  
+  # 性能优化选项
+  use_amp: true
+  use_checkpoint: true
+  cuda_deterministic: false
+  benchmark_cudnn: true
+  
+  # 内存优化
+  optimizer_states_on_cpu: true
+  save_only_last: true
+  save_optimizer: true
+
+# Evaluator configuration
+evaluator:
+  output_dir: "results/rd_esi_ambitious_evaluation"
+  device: "cuda:3"

@@ -187,13 +187,7 @@ class Trainer:
                 # Move batch to device
                 batch = {k: v.to(self.device) for k, v in batch.items() if k in ["input_ids", "attention_mask", "labels"]}
                 
-                # Debugging: Inspect labels to ensure padding tokens are masked
-                # 打印第一个样本的前50个标签，看是否有-100
-                print(f"DEBUG: Sample labels (first 50 tokens of batch[0]): {batch['labels'][0, :50].tolist()}")
-                # 打印批次中所有标签的唯一值，确认-100是否存在
-                print(f"DEBUG: Unique label values in batch: {torch.unique(batch['labels']).tolist()}")
-                # 打印tokenizer的pad_token_id，确认其是否有效
-                print(f"DEBUG: Tokenizer pad_token_id: {self.train_dataloader.dataset.tokenizer.pad_token_id}")
+
                 
                 # Track batch size for throughput calculation
                 batch_size = batch["input_ids"].size(0)
@@ -204,11 +198,7 @@ class Trainer:
                     with torch.amp.autocast('cuda'):  # 使用新的推荐用法
                         outputs = self.model(**batch)
                         
-                        # Debugging: Inspect model logits range
-                        logits = outputs["logits"]
-                        print(f"DEBUG: Logits shape: {logits.shape}")
-                        print(f"DEBUG: Logits mean: {logits.mean().item():.4f}, std: {logits.std().item():.4f}")
-                        print(f"DEBUG: Logits min: {logits.min().item():.4f}, max: {logits.max().item():.4f}")
+
                         
                         loss = outputs["loss"]
                         # Scale loss for gradient accumulation
@@ -242,28 +232,7 @@ class Trainer:
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
                         self.optimizer.step()
                     
-                    # Debugging: Check for NaN/Inf in gradients after optimizer step, before zero_grad
-                    nan_inf_found = False
-                    for name, param in self.model.named_parameters():
-                        if param.grad is not None:
-                            if torch.isnan(param.grad).any():
-                                print(f"DEBUG ERROR: NaN gradient found in parameter: {name}. Stopping training.")
-                                nan_inf_found = True
-                                break
-                            if torch.isinf(param.grad).any():
-                                print(f"DEBUG ERROR: Inf gradient found in parameter: {name}. Stopping training.")
-                                nan_inf_found = True
-                                break
-                    
-                    if nan_inf_found:
-                        # 如果发现 NaN/Inf，可以考虑保存模型状态并退出，方便调试
-                        # torch.save(self.model.state_dict(), f"model_nan_inf_grad_step_{global_step}.pt")
-                        # 为了避免日志刷屏，这里只打印一次并退出
-                        print("DEBUG: Training terminated due to NaN/Inf gradients.")
-                        # 抛出异常或直接退出循环
-                        raise RuntimeError("NaN or Inf gradients detected!") # 或者 return self.metrics
-                    # else: # 如果你希望每次都看到没有NaN/Inf的提示，可以取消注释
-                    #     print("DEBUG: No NaN/Inf gradients found in this step.")
+
                     
                     # Update learning rate
                     self.lr_scheduler.step()

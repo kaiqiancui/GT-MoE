@@ -126,64 +126,81 @@ class CustomMoELayer(nn.Module):
         # Get router outputs
         routing_weights, expert_indices, router_aux = self.router(x)
         
-        # Reshape input for expert processing
-        x_reshaped = x.view(-1, hidden_size)  # [batch_size * sequence_length, hidden_size]
+        # ---------- VECTORIZED EXPERT COMPUTATION ----------
+        # Step 1: Reshape input and routing tensors
+        # Flatten the input tensor from [batch_size, sequence_length, hidden_size] to [batch_size*sequence_length, hidden_size]
+        flat_x = x.reshape(-1, hidden_size)  # [batch_size * sequence_length, hidden_size]
+        flat_routing_weights = routing_weights.reshape(-1, self.top_k)  # [batch_size * sequence_length, top_k]
+        flat_expert_indices = expert_indices.reshape(-1, self.top_k)  # [batch_size * sequence_length, top_k]
         
-        # Initialize output tensor
-        final_output = torch.zeros_like(x_reshaped)
+        # Step 2: Create a token-to-expert mapping
+        # Create a tensor of token indices
+        token_indices = torch.arange(batch_size * sequence_length, device=x.device).unsqueeze(-1).expand(-1, self.top_k)
         
-        # Initialize tensor to store expert outputs for performance calculation
-        expert_outputs = torch.zeros(
-            batch_size * sequence_length, 
-            self.top_k, 
-            hidden_size, 
-            device=x.device
-        )
+        # Step 3: Create a flattened representation for efficient processing
+        # Stack token indices, expert indices, and top-k indices
+        # This creates a tensor of shape [batch_size*sequence_length*top_k, 3]
+        # Each row contains (token_idx, expert_idx, top_k_idx)
+        token_expert_pairs = torch.stack([
+            token_indices.reshape(-1),                   # Token index
+            flat_expert_indices.reshape(-1),            # Expert index
+            torch.arange(self.top_k, device=x.device).repeat(batch_size * sequence_length)  # Top-k index
+        ], dim=1)
         
-        # Process each expert
-        for i, expert in enumerate(self.experts):
-            # Find tokens routed to this expert
-            # For each token, find which of its top_k slots (if any) selected this expert
-            expert_mask = (expert_indices == i)  # [batch_size, sequence_length, top_k]
-            expert_mask_flat = expert_mask.view(-1, self.top_k)  # [batch_size * sequence_length, top_k]
-            
-            # If no tokens routed to this expert, skip
-            if not expert_mask_flat.any():
+        # Step 4: Sort by expert index for batch processing
+        # This groups all tokens going to the same expert together
+        sorted_pairs, sort_indices = torch.sort(token_expert_pairs[:, 1])
+        token_expert_pairs = token_expert_pairs[sort_indices]
+        
+        # Step 5: Initialize output tensors
+        # Create a tensor to store expert outputs for each token-expert pair
+        expert_outputs = torch.zeros(batch_size * sequence_length * self.top_k, hidden_size, device=x.device)
+        
+        # Step 6: Process each expert in a vectorized way
+        # Get the unique expert indices and their counts
+        unique_expert_indices, expert_counts = torch.unique_consecutive(token_expert_pairs[:, 1], return_counts=True)
+        
+        # Track the current position in the sorted array
+        pos = 0
+        for expert_idx, count in zip(unique_expert_indices, expert_counts):
+            if count == 0:
                 continue
                 
-            # For each token-expert pair, get the corresponding weight and token index
-            token_indices, top_k_indices = torch.where(expert_mask_flat)
+            # Get the token indices for this expert
+            expert_token_indices = token_expert_pairs[pos:pos+count, 0]
             
-            # Get inputs for this expert
-            expert_inputs = x_reshaped[token_indices]
+            # Get the inputs for this expert
+            expert_inputs = flat_x[expert_token_indices]
             
             # Process inputs with this expert
-            expert_output = expert(expert_inputs)
+            expert_idx = expert_idx.item()  # Convert to Python int for indexing
+            expert_output = self.experts[expert_idx](expert_inputs)
             
-            # Store expert outputs for performance calculation
-            for j, (token_idx, top_k_idx) in enumerate(zip(token_indices, top_k_indices)):
-                expert_outputs[token_idx, top_k_idx] = expert_output[j]
+            # Store the outputs
+            expert_outputs[sort_indices[pos:pos+count]] = expert_output
             
-            # Get weights for this expert
-            weights = routing_weights.view(-1, self.top_k)[token_indices, top_k_indices].unsqueeze(-1)
-            
-            # Add weighted expert output to final output
-            final_output.index_add_(
-                0, 
-                token_indices, 
-                expert_output * weights
-            )
+            # Move to the next expert
+            pos += count
+        
+        # Step 7: Reshape expert outputs and apply routing weights
+        expert_outputs = expert_outputs.reshape(batch_size * sequence_length, self.top_k, hidden_size)
+        flat_routing_weights = flat_routing_weights.unsqueeze(-1)  # [batch_size*sequence_length, top_k, 1]
+        
+        # Apply routing weights to expert outputs
+        weighted_expert_outputs = expert_outputs * flat_routing_weights
+        
+        # Step 8: Sum over the top_k dimension to get the final output
+        final_output = weighted_expert_outputs.sum(dim=1)  # [batch_size*sequence_length, hidden_size]
         
         # Apply dropout
         final_output = self.dropout(final_output)
         
         # Reshape output back to original shape
-        final_output = final_output.view(batch_size, sequence_length, hidden_size)
+        final_output = final_output.reshape(batch_size, sequence_length, hidden_size)
         
         # Calculate expert performance metrics based on output norms
-        # This implements the "based on activation norm" approach for current_performance_i
         performance_metrics = torch.norm(expert_outputs, p=2, dim=-1)
-        performance_metrics = performance_metrics.view(batch_size, sequence_length, self.top_k)
+        performance_metrics = performance_metrics.reshape(batch_size, sequence_length, self.top_k)
         
         # Prepare auxiliary outputs
         aux_outputs = {
@@ -191,6 +208,8 @@ class CustomMoELayer(nn.Module):
             "expert_indices": expert_indices,
             "routing_weights": routing_weights,
             "performance_metrics": performance_metrics,
+            # FIX: Extract and pass the auxiliary loss from the router
+            "aux_loss": router_aux.get("loss", torch.tensor(0.0, device=x.device))
         }
         
         return final_output, aux_outputs

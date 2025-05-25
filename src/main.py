@@ -6,7 +6,7 @@ import logging
 from typing import Dict, Any
 
 from models.custom_transformer_moe import CustomMoETransformer
-from data_utils.wikitext_loader import create_wikitext_dataloaders
+from data_utils.c4_loader import create_c4_dataloaders
 from data_utils.tokenizer_utils import load_tokenizer
 from training.trainer import Trainer
 from evaluation.evaluator import Evaluator
@@ -126,7 +126,7 @@ def main():
     
     # Create dataloaders
     data_config = config.get("data", {})
-    train_dataloader, val_dataloader, test_dataloader = create_wikitext_dataloaders(
+    train_dataloader, val_dataloader, test_dataloader = create_c4_dataloaders(
         tokenizer=tokenizer,
         **data_config,
     )

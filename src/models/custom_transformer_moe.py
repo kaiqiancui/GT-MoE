@@ -430,11 +430,9 @@ class CustomMoETransformer(nn.Module):
         # Token embeddings
         self.token_embeddings = nn.Embedding(self.vocab_size, self.hidden_size)
         
-        # Position embeddings
-        self.position_embeddings = nn.Embedding(self.max_seq_len, self.hidden_size)
-        
         # Layer normalization
-        self.ln_f = nn.LayerNorm(self.hidden_size)
+        # FIX: Replaced nn.LayerNorm with RMSNorm for architecture consistency
+        self.ln_f = RMSNorm(self.hidden_size)
         
         # Dropout
         self.dropout_layer = nn.Dropout(self.dropout)
@@ -463,9 +461,8 @@ class CustomMoETransformer(nn.Module):
             module: Module to initialize
         """
         if isinstance(module, nn.Linear):
-            # 使用更小的标准差进行初始化，以减小初始损失
-            # 根据输入维度缩放标准差，这是一种常用的做法
-            std = 0.02 / math.sqrt(self.hidden_size)
+                # FIX: Using standard initialization with std=0.02 (GPT-2 style) for more robust training
+            std = 0.02
             module.weight.data.normal_(mean=0.0, std=std)
             if module.bias is not None:
                 module.bias.data.zero_()
@@ -523,11 +520,8 @@ class CustomMoETransformer(nn.Module):
         position_ids = torch.arange(seq_length, dtype=torch.long, device=device).unsqueeze(0).expand(batch_size, -1)
         
         # Get embeddings
-        token_embeds = self.token_embeddings(input_ids)
-        position_embeds = self.position_embeddings(position_ids)
-        
-        # Combine embeddings
-        hidden_states = token_embeds + position_embeds
+        # FIX: Removed absolute position embeddings to resolve conflict with RoPE
+        hidden_states = self.token_embeddings(input_ids)
         hidden_states = self.dropout_layer(hidden_states)
         
         # Create attention mask if needed
@@ -585,6 +579,18 @@ class CustomMoETransformer(nn.Module):
             # 使用ignore_index=-100，确保标签为-100的位置（填充标记）不参与损失计算
             loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(shift_logits.view(-1, self.vocab_size), shift_labels.view(-1))
+            
+            # FIX: Add MoE auxiliary loss to the total loss
+            if aux_outputs:
+                # Extract and accumulate auxiliary losses from all MoE layers
+                aux_loss = 0.0
+                for layer_name, layer_aux in aux_outputs.items():
+                    if 'aux_loss' in layer_aux:
+                        aux_loss += layer_aux['aux_loss']
+                
+                # Apply weight to auxiliary loss and add to total loss
+                aux_loss_alpha = self.moe_config.get('aux_loss_alpha', 0.01)
+                loss = loss + aux_loss_alpha * aux_loss
         
         # Prepare outputs
         outputs = {

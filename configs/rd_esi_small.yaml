@@ -1,0 +1,74 @@
+# config_plan_A_debug.yaml
+model:
+  vocab_size: 50257
+  hidden_size: 256            # 极小的隐藏层，计算量很低
+  num_layers: 4               # 极少的层数
+  num_heads: 4                # 极少的头数
+  intermediate_size: 1024     # (256 * 4)
+  max_seq_len: 1024
+  dropout: 0.1
+  
+  # MoE configuration
+  moe_layers: [1, 3]          # 在 4 层模型中的位置
+  moe_config:
+    num_experts: 8            # 专家数减少，显著降低内存和计算
+    top_k: 2
+    router_config:
+      beta: 0.1
+      gamma: 0.1
+      alpha: 0.9
+      use_exploration_bonus: true
+      exploration_c: 0.1
+      use_reputation_decay: true
+      decay_rate: 0.99
+      load_ema_alpha: 0.9
+    expert_dropout: 0.1
+
+# Tokenizer configuration
+tokenizer:
+  tokenizer_name_or_path: "gpt2"
+  use_fast: true
+  add_special_tokens: true
+  padding_side: "right"
+
+# Data configuration
+data:
+  batch_size: 32              # 适当增大批次，充分利用GPU
+  max_length: 256             # 【关键】大幅缩短序列长度，这是提速最有效的方法
+  num_workers: 4
+  streaming: false
+
+# Trainer configuration
+trainer:
+  output_dir: "results/rd_esi_debug_run"
+  device: "cuda:3"
+  optimizer: "adamw"
+  learning_rate: 3e-4         # 【关键】从头训练的经典学习率
+  weight_decay: 0.01
+  lr_scheduler: "cosine"
+  warmup_steps: 500           # 预热步数相应减少
+  max_steps: 5000             # 【关键】总步数大幅减少，足够看到loss下降趋势
+  gradient_accumulation_steps: 2 # 减少累积步数，加快更新频率
+  max_grad_norm: 1.0
+  log_interval: 10
+  eval_interval: 500
+  save_interval: 1000
+  use_wandb: false
+  wandb_project: "rd-esi-moe"
+  wandb_run_name: "rd-esi-debug-run"
+  
+  # 性能优化选项
+  use_amp: true
+  use_checkpoint: true
+  cuda_deterministic: false
+  benchmark_cudnn: true
+  
+  # 内存优化
+  optimizer_states_on_cpu: true
+  save_only_last: true
+  save_optimizer: true
+
+# Evaluator configuration
+evaluator:
+  output_dir: "results/rd_esi_debug_evaluation"
+  device: "cuda:3"
