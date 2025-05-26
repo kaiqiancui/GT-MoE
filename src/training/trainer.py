@@ -97,7 +97,7 @@ class Trainer:
         self.benchmark_cudnn = self.config.get("benchmark_cudnn", False)
         self.save_only_last = self.config.get("save_only_last", False)
         self.save_optimizer = self.config.get("save_optimizer", True)
-        
+
         # Setup automatic mixed precision if enabled
         self.scaler = None
         if self.use_amp:
@@ -129,6 +129,7 @@ class Trainer:
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, "checkpoints"), exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, "plots"), exist_ok=True)
+        
         
         # Initialize metrics
         self.metrics = {
@@ -195,13 +196,23 @@ class Trainer:
                 
                 # Forward and backward pass with AMP if enabled
                 if self.use_amp:
-                    with torch.amp.autocast('cuda'):  # 使用新的推荐用法
+                    with torch.amp.autocast('cuda'):
                         outputs = self.model(**batch)
+                        # 1. Retrieve the main loss and the auxiliary loss
                         loss = outputs["loss"]
+                        aux_loss = outputs.get("aux_loss", 0.0)
                 else:
                     # Standard forward pass
                     outputs = self.model(**batch)
+                    # 1. Retrieve the main loss and the auxiliary loss
                     loss = outputs["loss"]
+                    aux_loss = outputs.get("aux_loss", 0.0)
+                
+                # 2. Get the auxiliary loss coefficient from the config
+                aux_loss_coef = self.config.get("aux_loss_coef", 0.01)
+                
+                # 3. Compute the final total loss for this step
+                total_loss = loss + aux_loss * aux_loss_coef
                 
                 # --- IMPORTANT: Update MoE router states here ---
                 # FIX: Update router state for EVERY batch, immediately after the forward pass.
@@ -220,17 +231,17 @@ class Trainer:
                             )
                 # --- End of MoE router state update ---
                 
-                # Scale loss for gradient accumulation
-                loss = loss / gradient_accumulation_steps
+                # Scale the TOTAL loss for gradient accumulation
+                scaled_total_loss = total_loss / gradient_accumulation_steps
                 
-                # Backward pass
+                # Backward pass on the scaled TOTAL loss
                 if self.use_amp:
-                    self.scaler.scale(loss).backward()
+                    self.scaler.scale(scaled_total_loss).backward()
                 else:
-                    loss.backward()
+                    scaled_total_loss.backward()
                 
-                # Update step loss
-                step_loss += loss.item()
+                # Update step loss with the total loss (including auxiliary loss)
+                step_loss += total_loss.item()
                 
                 # Update parameters if gradient accumulation is complete
                 if (step + 1) % gradient_accumulation_steps == 0:

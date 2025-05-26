@@ -8,7 +8,7 @@
 
 然而，当前主流的MoE路由机制，如经典的Top-K门控（gating）[13]，虽然简单高效，但也存在一些固有问题。这些问题包括专家间的负载不均衡（某些专家被过度使用，而另一些则处于空闲状态）、专家特化程度不足以及“马太效应”（Matthew effect），即少数高性能专家持续获得更多计算资源，导致其他专家缺乏学习和提升的机会 [4]。这些问题限制了MoE架构潜力的充分发挥。
 
-为解决上述挑战，本项目提出一种名为“基于声誉的动态专家选择与自适应激励（Reputation-based Dynamic Expert Selection with Adaptive Incentives, RD-ESI）”的新型MoE路由机制。RD-ESI旨在通过引入动态声誉评分、自适应激励机制和负载感知策略，优化专家选择过程。该机制将在先进的MoE大语言模型DeepSeek V3 [16] 上进行实现和评估，并使用意大利语gsarti/clean\_mc4\_it数据集 [26] 进行实验验证。
+为解决上述挑战，本项目提出一种名为“基于声誉的动态专家选择与自适应激励（Reputation-based Dynamic Expert Selection with Adaptive Incentives, RD-ESI）”的新型MoE路由机制。RD-ESI旨在通过引入动态声誉评分、自适应激励机制和负载感知策略，优化专家选择过程。
 
 ### **1.2. RD-ESI机制概述**
 

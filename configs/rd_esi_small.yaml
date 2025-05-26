@@ -50,16 +50,17 @@ trainer:
   output_dir: "results/rd_esi_debug_run"
   device: "cuda:3"
   optimizer: "adamw"
-  learning_rate: 3e-4         # 【关键】从头训练的经典学习率
+  learning_rate: 3e-4         
   weight_decay: 0.01
   lr_scheduler: "cosine"
   warmup_steps: 500           # 预热步数相应减少
-  max_steps: 5000             # 【关键】总步数大幅减少，足够看到loss下降趋势
+  aux_loss_coef: 0.01
+  max_steps: 100005             
   gradient_accumulation_steps: 2 # 减少累积步数，加快更新频率
   max_grad_norm: 1.0
   log_interval: 10
-  eval_interval: 500
-  save_interval: 1000
+  eval_interval: 2500
+  save_interval: 5000
   use_wandb: false
   wandb_project: "rd-esi-moe"
   wandb_run_name: "rd-esi-debug-run"
