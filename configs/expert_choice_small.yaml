@@ -1,0 +1,73 @@
+# Configuration for Expert Choice Routing Custom Model (Aligned with RD-ESI Debug Scale)
+
+# Model configuration
+model:
+  vocab_size: 50257                         # GPT-2 vocabulary size - 保持不变
+  hidden_size: 256                          # MODIFIED: 原为 512, 匹配 RD-ESI
+  num_layers: 4                             # MODIFIED: 原为 6, 匹配 RD-ESI
+  num_heads: 4                              # MODIFIED: 原为 8, 匹配 RD-ESI
+  intermediate_size: 1024                   # MODIFIED: 原为 2048, 匹配 RD-ESI (256 * 4)
+  max_seq_len: 1024                         # 保持不变
+  dropout: 0.1                              # 保持不变
+  
+  # MoE configuration
+  moe_layers: [1, 3]                        # MODIFIED: 原为 [2, 4], 根据新的 num_layers: 4 调整，以匹配 RD-ESI 的2个MoE层位置
+  moe_config:
+    num_experts: 8                          # MODIFIED: 原为 16, 匹配 RD-ESI
+    # Expert Choice routing 没有 top_k 参数
+    router_config:
+      # Expert Choice 特有的参数
+      capacity_factor: 1.0                  # 保持不变 (Expert Choice 的核心参数之一，控制每个专家的处理容量， RD-ESI中没有直接对应项，保留其默认或常用值)
+    expert_dropout: 0.1                     # 保持不变
+
+# Tokenizer configuration
+tokenizer:
+  tokenizer_name_or_path: "gpt2"            # 保持不变
+  use_fast: true                            # 保持不变
+  add_special_tokens: true                  # 保持不变
+  padding_side: "right"                     # 保持不变
+
+# Data configuration
+# 注意: RD-ESI 配置包含C4数据集特定的加载参数 (num_files_to_load, file_pattern)。
+# 请确保 Expert Choice 模型的数据流程能提供可比较的数据集大小，如果未使用完全相同的C4加载方式。
+data:
+  batch_size: 16                            # 保持不变
+  max_length: 512                           # 保持不变
+  num_workers: 8                            # MODIFIED: 原为 4, 匹配 RD-ESI
+  streaming: false                          # 保持不变, RD-ESI 的C4加载在此调试设置下可能也是非流式的
+
+# Trainer configuration
+trainer:
+  output_dir: "results/expert_choice_run_scaled_debug" # MODIFIED: 建议新的输出目录
+  device: "cuda:3"                          # MODIFIED: 原为 "cuda", 匹配 RD-ESI 指定的设备
+  optimizer: "adamw"                        # 保持不变
+  learning_rate: 3e-4                       # MODIFIED: 原为 5e-5, 匹配 RD-ESI
+  weight_decay: 0.01                        # 保持不变
+  lr_scheduler: "cosine"                    # 保持不变
+  warmup_steps: 500                         # MODIFIED: 原为 100, 匹配 RD-ESI
+  # Expert Choice 通常不通过trainer传递 aux_loss_coef, 其平衡机制内建于路由算法和 capacity_factor
+  max_steps: 100005                         # MODIFIED: 原为 5000, 匹配 RD-ESI
+  gradient_accumulation_steps: 2            # MODIFIED: 原为 4, 匹配 RD-ESI
+  max_grad_norm: 1.0                        # 保持不变
+  log_interval: 10                          # 保持不变
+  eval_interval: 2500                       # MODIFIED: 原为 500, 匹配 RD-ESI
+  save_interval: 5000                       # MODIFIED: 原为 1000, 匹配 RD-ESI
+  use_wandb: false                          # 保持不变
+  wandb_project: "rd-esi-moe"               # 保持不变
+  wandb_run_name: "expert-choice-run-scaled-debug" # MODIFIED: 建议新的运行名称
+
+  # 性能优化选项 (从 RD-ESI 匹配)
+  use_amp: true                             # ADDED: 匹配 RD-ESI
+  use_checkpoint: true                      # ADDED: 匹配 RD-ESI
+  cuda_deterministic: false                 # ADDED: 匹配 RD-ESI
+  benchmark_cudnn: true                     # ADDED: 匹配 RD-ESI
+  
+  # 内存优化 (从 RD-ESI 匹配)
+  optimizer_states_on_cpu: true             # ADDED: 匹配 RD-ESI
+  save_only_last: true                      # ADDED: 匹配 RD-ESI
+  save_optimizer: true                      # ADDED: 匹配 RD-ESI (假设这也是 RD-ESI 想要的行为)
+
+# Evaluator configuration
+evaluator:
+  output_dir: "results/expert_choice_evaluation_scaled_debug" # MODIFIED: 建议新的输出目录
+  device: "cuda:1"                          # MODIFIED: 原为 "cuda", 匹配 RD-ESI 指定的设备

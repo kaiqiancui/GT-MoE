@@ -103,24 +103,6 @@ python src/preprocess_data.py --config_file configs/rd_esi_small.yaml
 
 这个过程可能会花费相当长的时间，具体取决于您的机器的CPU核心数和磁盘速度，但它只需要执行一次。处理后的数据将保存到配置文件中由 `processed_data_path` 指定的目录（默认为 `./processed_data/`）。
 
-## 5. 数据集
-
-本项目使用 **WikiText dataset** 作为训练和评估数据集。WikiText 是一个大规模的高质量语言建模数据集，由Salesforce研究团队创建。
-
-### WikiText 数据集特点
-* **来源**: 从维基百科上精选的高质量文章
-* **规模**: WikiText-103包含约103M个单词，WikiText-2包含约2M个单词
-* **语言**: 英语文本
-* **格式**: 已经过清洗和预处理，保留了文章结构和标点符号
-* **适用性**: 特别适合语言模型训练，比传统的Penn Treebank数据集更大更多样化
-
-### 数据处理
-`src/data_utils/wikitext_loader.py` 实现了 WikiText 数据集的加载和处理逻辑:
-1.  使用 HuggingFace Datasets 库加载数据
-2.  使用数据集自带的训练集、验证集和测试集划分
-3.  对文本进行分词处理
-4.  创建适用于语言模型训练的批次数据
-
 ## 5. 安装与环境设置
 
 1.  克隆本项目。
@@ -147,12 +129,12 @@ python src/main.py --config_file configs/rd_esi_small.yaml --mode train --output
 
 #### Top-K 基线模型训练
 ```bash
-python src/main.py --config_file configs/top_k_custom_model_config.yaml --mode train --output_dir results/top_k
+python src/main.py --config_file configs/top_k_small.yaml --mode train --output_dir results/top_k
 ```
 
 #### Expert Choice 基线模型训练
 ```bash
-python src/main.py --config_file configs/expert_choice_custom_model_config.yaml --mode train --output_dir results/expert_choice
+python src/main.py --config_file configs/expert_choice_small.yaml --mode train --output_dir results/expert_choice
 ```
 
 ### 6.2 评估模型
