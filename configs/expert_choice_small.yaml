@@ -13,6 +13,7 @@ model:
   # MoE configuration
   moe_layers: [1, 3]                        # MODIFIED: 原为 [2, 4], 根据新的 num_layers: 4 调整，以匹配 RD-ESI 的2个MoE层位置
   moe_config:
+    routing_type: "expert_choice"
     num_experts: 8                          # MODIFIED: 原为 16, 匹配 RD-ESI
     # Expert Choice routing 没有 top_k 参数
     router_config:

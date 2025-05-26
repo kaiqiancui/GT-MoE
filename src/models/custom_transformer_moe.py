@@ -332,11 +332,43 @@ class TransformerBlock(nn.Module):
         # Feed-forward or MoE module
         if use_moe:
             assert moe_config is not None, "moe_config must be provided when use_moe=True"
-            self.ffn = CustomMoELayer(
-                hidden_size=hidden_size,
-                intermediate_size=intermediate_size,
-                **moe_config,
-            )
+            routing_type = moe_config.get("routing_type", "rd_esi") # Default if not specified
+            
+            num_experts_val = moe_config.get("num_experts")
+            expert_dropout_val = moe_config.get("expert_dropout", 0.0)
+            router_specific_params = moe_config.get("router_config", {})
+
+            if routing_type == "rd_esi":
+                self.ffn = CustomMoELayer(
+                    hidden_size=hidden_size,
+                    intermediate_size=intermediate_size,
+                    num_experts=num_experts_val,
+                    top_k=moe_config.get("top_k", 2),
+                    router_config=router_specific_params, # Pass RD-ESI specific router params
+                    expert_dropout=expert_dropout_val,
+                )
+            elif routing_type == "top_k":
+                self.ffn = TopKGatingMoELayer(
+                    hidden_size=hidden_size,
+                    intermediate_size=intermediate_size,
+                    num_experts=num_experts_val,
+                    top_k=moe_config.get("top_k", 2),
+                    use_aux_loss=router_specific_params.get("use_aux_loss", True),
+                    aux_loss_weight=float(router_specific_params.get("aux_loss_weight", 0.01)),
+                    expert_dropout=expert_dropout_val,
+                )
+            elif routing_type == "expert_choice":
+                self.ffn = ExpertChoiceMoELayer(
+                    hidden_size=hidden_size,
+                    intermediate_size=intermediate_size,
+                    num_experts=num_experts_val,
+                    capacity_factor=float(router_specific_params.get("capacity_factor", 1.0)),
+                    expert_dropout=expert_dropout_val,
+                )
+                
+                
+            else:
+                raise ValueError(f"Unsupported routing_type: {routing_type}")
         else:
             self.ffn = FeedForward(
                 hidden_size=hidden_size,

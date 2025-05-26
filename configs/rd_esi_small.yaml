@@ -11,6 +11,7 @@ model:
   # MoE configuration
   moe_layers: [1, 3]          # 在 4 层模型中的位置
   moe_config:
+    routing_type: "rd_esi"
     num_experts: 8            # 专家数减少，显著降低内存和计算
     top_k: 2
     router_config:

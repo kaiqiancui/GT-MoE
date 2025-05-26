@@ -13,11 +13,10 @@ model:
   # MoE configuration
   moe_layers: [1, 3]                        # MODIFIED: Was [2, 4], adjusted for new num_layers to match RD-ESI's 2 MoE layers
   moe_config:
+    routing_type: "top_k"
     num_experts: 8                          # MODIFIED: Was 16, matched RD-ESI
     top_k: 2                                # Kept same
     router_config:
-      # No RD-ESI specific parameters for Top-K
-      # Using standard Top-K gating with auxiliary loss
       use_aux_loss: true
       aux_loss_weight: 0.01                 # Kept same, matches RD-ESI's aux_loss_coef
     expert_dropout: 0.1                     # Kept same
@@ -30,9 +29,15 @@ tokenizer:
   padding_side: "right"                     # Kept same
 
 # Data configuration
-# Note: RD-ESI config has C4-specific loading (num_files_to_load, file_pattern). 
-# Ensure your data pipeline for Top-K provides a comparable dataset size if not using the exact same C4 loading.
 data:
+  # Local data path configuration
+  num_files_to_load: 13
+  file_pattern: "c4-train.{i:05d}-of-01024.json.gz"
+  
+  # Processed data path for saving/loading tokenized data
+  processed_data_path: "./processed_data/c4_tokenized"
+  
+  # Training parameters
   batch_size: 16                            # Kept same
   max_length: 512                           # Kept same
   num_workers: 8                            # MODIFIED: Was 4, matched RD-ESI

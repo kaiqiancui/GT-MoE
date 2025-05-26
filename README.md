@@ -6,7 +6,7 @@
 
 与当前主流MoE路由机制（如Top-K门控）相比，RD-ESI引入了动态声誉评分 $R_i(t)$、负载感知 $L_i(t)$ 以及探索奖励和声誉衰减等自适应激励策略，以期优化专家选择过程，改善负载均衡，促进专家特化，并缓解马太效应。
 
-核心目标：通过在 **WikiText dataset** 上进行实验，主要验证RD-ESI博弈论算法的性能和核心机制，而非构建一个领先水平的大型模型。
+核心目标：通过在 **C4的子集** 上进行实验，主要验证RD-ESI博弈论算法的性能和核心机制。
 
 详细的算法设计、公式、实现方案、训练策略和评估指标请参考项目研究方案文档。
 
@@ -100,23 +100,13 @@
 ```bash
 python src/preprocess_data.py --config_file configs/rd_esi_small.yaml
 ```
-
-这个过程可能会花费相当长的时间，具体取决于您的机器的CPU核心数和磁盘速度，但它只需要执行一次。处理后的数据将保存到配置文件中由 `processed_data_path` 指定的目录（默认为 `./processed_data/`）。
+处理后的数据将保存到配置文件中由 `processed_data_path` 指定的目录（默认为 `./processed_data/`）。
 
 ## 5. 安装与环境设置
 
-1.  克隆本项目。
-2.  创建并激活Python虚拟环境（推荐使用conda）：
-    ```bash
-    conda create -n gt_moe_env python=3.9
-    conda activate gt_moe_env
-    ```
-3.  安装依赖：
-    ```bash
-    pip install -r requirements.txt
-    ```
 
 ## 6. 运行实验
+
 
 ### 6.1 训练模型
 
