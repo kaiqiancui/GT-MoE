@@ -479,8 +479,10 @@ class Trainer:
         """
         os.makedirs(path, exist_ok=True)
         
-        # Save model
-        self.model.save_pretrained(path)
+        # Save model state dict
+        # CustomMoETransformer doesn't have save_pretrained method, use torch.save instead
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.model.state_dict(), os.path.join(path, "pytorch_model.bin"))
         
         # Save optimizer and scheduler if configured
         if self.save_optimizer:

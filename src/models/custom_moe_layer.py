@@ -177,7 +177,7 @@ class CustomMoELayer(nn.Module):
             expert_output = self.experts[expert_idx](expert_inputs)
             
             # Store the outputs
-            expert_outputs[sort_indices[pos:pos+count]] = expert_output
+            expert_outputs[sort_indices[pos:pos+count]] = expert_output.to(expert_outputs.dtype)
             
             # Move to the next expert
             pos += count

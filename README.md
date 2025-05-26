@@ -142,7 +142,7 @@ python src/preprocess_data.py --config_file configs/rd_esi_small.yaml
 
 #### RD-ESI 模型训练
 ```bash
-python src/main.py --config_file configs/rd_esi_custom_model_config.yaml --mode train --output_dir results/rd_esi
+python src/main.py --config_file configs/rd_esi_small.yaml --mode train --output_dir results/rd_esi
 ```
 
 #### Top-K 基线模型训练

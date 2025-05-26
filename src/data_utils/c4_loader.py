@@ -4,7 +4,7 @@ from datasets import load_dataset
 from transformers import PreTrainedTokenizerBase
 from typing import Dict, List, Tuple, Any, Optional, Union, Callable, Iterator
 import numpy as np
-
+import os 
 
 class C4Dataset(IterableDataset):
     """
@@ -26,6 +26,10 @@ class C4Dataset(IterableDataset):
         streaming: bool = True,
         shuffle: bool = True,
         seed: int = 42,
+        local_data_path: str = None,
+        num_files_to_load: int = 13,
+        file_pattern: str = "c4-train.{i:05d}-of-01024.json.gz",
+        **kwargs
     ):
         """
         Initialize C4Dataset.
@@ -54,16 +58,27 @@ class C4Dataset(IterableDataset):
             dataset_split = "train"
         
         # 使用几个文件进行导入
-        dataset_path = "/disks/sata2/kaiqian/.cache/huggingface/hub/datasets--allenai--c4/snapshots/1588ec454efa1a09f29cd18ddd04fe05fc8653a2/en"
+        dataset_path = "/disks/sata2/kaiqian/.cache/huggingface/hub/datasets--allenai--c4/snapshots/1588ec454efa1a09f29cd18ddd04fe05fc8653a2/en/"
         
         
         num_files_to_load = 13
 
         downloaded_files = [
-            f"{data_path}c4-train.{i:05d}-of-01024.json.gz" 
+            f"{dataset_path}c4-train.{i:05d}-of-01024.json.gz" 
             for i in range(num_files_to_load)
         ]
 
+        # 使用本地文件路径
+        dataset_path = local_data_path if local_data_path else "/disks/sata2/kaiqian/.cache/huggingface/hub/datasets--allenai--c4/snapshots/1588ec454efa1a09f29cd18ddd04fe05fc8653a2/en/"
+        num_files = num_files_to_load
+        file_pat = file_pattern
+        
+        # 准备本地文件列表
+        downloaded_files = [
+            f"{dataset_path}{file_pat.format(i=i)}" 
+            for i in range(num_files)
+        ]
+        
         # Load the dataset in streaming mode
         self.data = load_dataset(
             "json",
@@ -144,6 +159,10 @@ class C4MapDataset(Dataset):
         num_proc: int = 4,
         shuffle: bool = True,
         seed: int = 42,
+        local_data_path: str = None,
+        num_files_to_load: int = 13,
+        file_pattern: str = "c4-train.{i:05d}-of-01024.json.gz",
+        **kwargs
     ):
         """
         Initialize C4MapDataset.
@@ -171,13 +190,15 @@ class C4MapDataset(Dataset):
         else:
             dataset_split = "train"
         
-        # 1. 定义你本地文件的路径和数量
-        #    这个逻辑和你原来的 C4Dataset (流式版本) 完全一样
-        dataset_path = "/disks/sata2/kaiqian/.cache/huggingface/hub/datasets--allenai--c4/snapshots/1588ec454efa1a09f29cd18ddd04fe05fc8653a2/en/"
-        num_files_to_load = 13
+        # 1. 定义本地文件的路径和数量
+        # 使用传入的参数或默认值
+        dataset_path = local_data_path if 'local_data_path' in kwargs else "/disks/sata2/kaiqian/.cache/huggingface/hub/datasets--allenai--c4/snapshots/1588ec454efa1a09f29cd18ddd04fe05fc8653a2/en/"
+        num_files = num_files_to_load if 'num_files_to_load' in kwargs else 13
+        file_pat = file_pattern if 'file_pattern' in kwargs else "c4-train.{i:05d}-of-01024.json.gz"
+        
         downloaded_files = [
-            f"{dataset_path}c4-train.{i:05d}-of-01024.json.gz" 
-            for i in range(num_files_to_load)
+            f"{dataset_path}{file_pat.format(i=i)}" 
+            for i in range(num_files)
         ]
 
         # 2. 从本地 JSON 文件加载数据，而不是从 "allenai/c4" Hub 加载
@@ -280,6 +301,10 @@ def create_c4_dataloaders(
     num_workers: int = 4,
     streaming: bool = True,
     processed_data_path: str = None,
+    local_data_path: str = None,
+    num_files_to_load: int = 13,
+    file_pattern: str = "c4-train.{i:05d}-of-01024.json.gz",
+    **kwargs  # Accept additional parameters from config
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     Create DataLoaders for the C4 dataset.
@@ -319,7 +344,22 @@ def create_c4_dataloaders(
             print(f"Dataset split into: {len(train_dataset)} train, {len(val_dataset)} val, {len(test_dataset)} test examples")
             
             # Create PyTorch datasets
-            from torch.utils.data import TensorDataset
+            from torch.utils.data import TensorDataset, Dataset
+            
+            # Create a wrapper dataset that converts tuples to dictionaries
+            class DictionaryDataset(Dataset):
+                def __init__(self, tensor_dataset):
+                    self.tensor_dataset = tensor_dataset
+                    self.keys = ["input_ids", "attention_mask", "labels"]
+                
+                def __len__(self):
+                    return len(self.tensor_dataset)
+                
+                def __getitem__(self, idx):
+                    # Get the tuple from the tensor dataset
+                    tensors = self.tensor_dataset[idx]
+                    # Convert to dictionary with the expected keys
+                    return {key: tensor for key, tensor in zip(self.keys, tensors)}
             
             # Ensure labels are created for language modeling
             def prepare_lm_dataset(dataset):
@@ -329,8 +369,10 @@ def create_c4_dataloaders(
                 # Set padding tokens to -100 so they're ignored in loss calculation
                 if tokenizer.pad_token_id is not None:
                     labels[dataset['attention_mask'] == 0] = -100
-                    
-                return TensorDataset(dataset['input_ids'], dataset['attention_mask'], labels)
+                
+                # Create a TensorDataset and wrap it with our DictionaryDataset
+                tensor_dataset = TensorDataset(dataset['input_ids'], dataset['attention_mask'], labels)
+                return DictionaryDataset(tensor_dataset)
             
             # Use map-style datasets for preprocessed data
             streaming = False

@@ -34,7 +34,7 @@ tokenizer:
 # Data configuration
 data:
   # Local data path configuration
-  local_data_path: "/disks/sata2/kaiqian/.cache/huggingface/hub/datasets--allenai--c4/snapshots/1588ec454efa1a09f29cd18ddd04fe05fc8653a2/en/"
+  # local_data_path: "/disks/sata2/kaiqian/.cache/huggingface/hub/datasets--allenai--c4/snapshots/1588ec454efa1a09f29cd18ddd04fe05fc8653a2/en/"
   num_files_to_load: 13
   file_pattern: "c4-train.{i:05d}-of-01024.json.gz"
   
