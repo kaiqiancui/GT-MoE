@@ -27,7 +27,8 @@ except json.JSONDecodeError:
 val_loss = metrics.get("val_loss", [])
 val_ppl = metrics.get("val_ppl", [])
 eval_steps = metrics.get("eval_steps", []) # This is your x-axis for validation metrics
-
+if len(val_loss) == len(eval_steps) + 1:
+    eval_steps.insert(0, 0)
 # Training metrics
 train_loss_raw = metrics.get("train_loss", [])
 expert_load_variance_raw = metrics.get("expert_load_variance", [])
