@@ -52,8 +52,8 @@
 ## RD-ESI 机制：理论的实践方案
 
 直接求解 PBE 在计算上是不可行的。因此，我们设计了 **RD-ESI** 机制，作为 PBE 理论的一个工程近似实现。RD-ESI 的核心是一份动态激励合约，即专家选择分数 `SelectionScore`：
-
-$$\text{Score}_i(x,t) = \underbrace{g_i(x; w)}_{\substack{\text{解决} \\ \text{逆向选择}}} + \underbrace{\beta R_i(t)}_{\substack{\text{缓解} \\ \text{道德风险}}} - \underbrace{\gamma L_i(t)}_{\substack{\text{内部化} \\ \text{负外部性}}} + \underbrace{\text{Bonus}_i}_{\substack{\text{平衡} \\ \text{探索-利用}}}$$
+![RD-ESI 激励合约公式](assets/math.jpg)
+<!-- $$\text{Score}_i(x,t) = \underbrace{g_i(x; w)}_{\substack{\text{解决} \\ \text{逆向选择}}} + \underbrace{\beta R_i(t)}_{\substack{\text{缓解} \\ \text{道德风险}}} - \underbrace{\gamma L_i(t)}_{\substack{\text{内部化} \\ \text{负外部性}}} + \underbrace{\text{Bonus}_i}_{\substack{\text{平衡} \\ \text{探索-利用}}}$$ -->
 
 合约的每个组成部分都旨在应对一个具体的博弈挑战：
 -   **基础门控分数 $g_i(x; w)$**: 一个可微分的神经网络，通过任务 $x$ 与专家 $i$ 的特征匹配，直接评估其**潜在能力**，以解决**逆向选择**。
