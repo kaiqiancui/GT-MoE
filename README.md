@@ -3,7 +3,9 @@
 [![Open Source License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![GitHub stars](https://img.shields.io/github/stars/kaiqiancui/GT-MoE.svg?style=social)](https://github.com/kaiqiancui/GT-MoE)
 
-**项目作者**: [崔凯乾](https://github.com/kaiqiancui) (中山大学), [杜健](mailto:dujian5@mail2.sysu.edu.cn) (中山大学)
+本项目为博弈论课程期末大作业
+
+**项目作者**: [崔凯乾](https://github.com/kaiqiancui), [杜健](https://github.com/dj2717166816)
 
 ---
 
